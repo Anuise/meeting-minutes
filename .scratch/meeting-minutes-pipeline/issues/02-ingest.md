@@ -8,12 +8,12 @@
 
 **Status:** ready-for-agent
 
-- [ ] `ingest` 子指令加入 CLI，吃 argv、把結果以 JSON 印到 stdout、錯誤走 exit code、完全非互動。
-- [ ] `mm-ingest` skill 可手動呼叫，開頭做 Docker daemon 健康檢查。
-- [ ] PDF、Word、PowerPoint、Excel、HTML、CSV、JSON、XML、EPub、Outlook 郵件與圖片各有一個小 fixture，執行後產出對應 Note。
-- [ ] `.mp3`、`.m4a`、`.wav`、`.mp4` 被跳過，且出現在回報中並附「請先自行轉成逐字稿」的說明；不是安靜跳過。
-- [ ] Note 已存在且比對應的 Raw Material 新時被跳過，且跳過的項目出現在回報中。
-- [ ] 單一檔案轉換失敗時，其餘檔案照常處理，失敗項目集中列在回報的失敗清單中，整批不中斷。
-- [ ] Note 的檔名看得出它來自哪一份 Raw Material，使用者看到 source 引用時能立刻對回原檔。
-- [ ] 測試斷言：執行前後 `rawdata/` 目錄下所有檔案位元組完全未變。
-- [ ] compose 中 `rawdata` 確實以唯讀掛載。
+- [x] `ingest` 子指令加入 CLI，吃 argv、把結果以 JSON 印到 stdout、錯誤走 exit code、完全非互動。
+- [x] `mm-ingest` skill 可手動呼叫，開頭做 Docker daemon 健康檢查。
+- [x] PDF、Word、PowerPoint、Excel、HTML、CSV、JSON、XML、EPub、Outlook 郵件與圖片各有一個小 fixture，執行後產出對應 Note。
+- [x] `.mp3`、`.m4a`、`.wav`、`.mp4` 被跳過，且出現在回報中並附「請先自行轉成逐字稿」的說明；不是安靜跳過。
+- [x] Note 已存在且比對應的 Raw Material 新時被跳過，且跳過的項目出現在回報中。
+- [x] 單一檔案轉換失敗時，其餘檔案照常處理，失敗項目集中列在回報的失敗清單中，整批不中斷。
+- [x] Note 的檔名看得出它來自哪一份 Raw Material，使用者看到 source 引用時能立刻對回原檔。
+- [x] 測試斷言：執行前後 `rawdata/` 目錄下所有檔案位元組完全未變。
+- [x] compose 中 `rawdata` 確實以唯讀掛載。

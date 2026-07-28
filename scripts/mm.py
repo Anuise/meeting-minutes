@@ -213,9 +213,75 @@ def cmd_init(args):
     return {"root": str(root), "created": created, "skipped": skipped}
 
 
+class CommandError(Exception):
+    """使用者能修正的錯誤：訊息走 stderr、走非零 exit code。"""
+
+    EXIT_CODE = 1  # 2 是 argparse 的用法錯誤，留給它
+
+
+# ADR-0003：不收音訊。錄音必須先由外部工具轉成逐字稿才進得來。
+AUDIO_SUFFIXES = frozenset({".mp3", ".m4a", ".wav", ".mp4"})
+AUDIO_MESSAGE = "不支援音訊。請先自行轉成逐字稿，再把逐字稿放進 rawdata/。"
+
+
+def cmd_ingest(args):
+    """把 rawdata/<meeting>/ 底下的檔案機械轉成 notes/<meeting>/ 的 markdown。
+
+    只寫 notes/，絕不寫 rawdata/。單一檔案失敗不中斷整批，失敗項目集中回報。
+    """
+    from markitdown import MarkItDown
+
+    root = Path(args.root)
+    raw_root = root / "rawdata" / args.meeting
+    if not raw_root.is_dir():
+        raise CommandError(f"找不到 Raw Material 目錄：rawdata/{args.meeting}")
+    note_root = root / "notes" / args.meeting
+
+    markitdown = MarkItDown()
+    ingested = []
+    skipped = []
+    unsupported = []
+    failed = []
+
+    for raw in sorted(path for path in raw_root.rglob("*") if path.is_file()):
+        relative = raw.relative_to(raw_root).as_posix()
+
+        if raw.suffix.lower() in AUDIO_SUFFIXES:
+            unsupported.append({"raw": relative, "message": AUDIO_MESSAGE})
+            continue
+
+        # 副檔名留在 Note 檔名裡：看得出來源，且 slides.pdf 與 slides.docx 不會互相蓋掉
+        note_relative = f"{relative}.md"
+        note = note_root / note_relative
+        # 只在 Note 確實比 Raw Material 新時跳過：時間戳打平時寧可多轉一次，
+        # 也不要漏掉使用者剛換上去的素材。
+        if note.exists() and note.stat().st_mtime > raw.stat().st_mtime:
+            skipped.append({"raw": relative, "note": note_relative})
+            continue
+
+        try:
+            markdown = markitdown.convert(str(raw)).markdown
+        except Exception as error:
+            failed.append({"raw": relative, "error": f"{type(error).__name__}: {error}"})
+            continue
+
+        note.parent.mkdir(parents=True, exist_ok=True)
+        note.write_text(markdown, encoding="utf-8")
+        ingested.append({"raw": relative, "note": note_relative})
+
+    return {
+        "meeting": args.meeting,
+        "rawdata": str(raw_root),
+        "notes": str(note_root),
+        "ingested": ingested,
+        "skipped": skipped,
+        "unsupported": unsupported,
+        "failed": failed,
+    }
+
+
 PLANNED_SUBCOMMANDS = """\
 尚未實作的子指令（各自由後續 ticket 帶進來）：
-  ingest        把 Raw Material 轉成 Note
   render        把 Minutes Record 套模板變成 Deliverable
   check         列出空欄位、缺 source、模板變數對不到 schema
   scan-docx     列出 Docx Source 的段落與表格儲存格供打洞
@@ -238,12 +304,22 @@ def build_parser():
     init.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
     init.set_defaults(func=cmd_init)
 
+    ingest = subparsers.add_parser("ingest", help="把 Raw Material 轉成 Note")
+    ingest.add_argument("meeting", help="Meeting slug，即 rawdata/ 底下的資料夾名稱")
+    ingest.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
+    ingest.set_defaults(func=cmd_ingest)
+
     return parser
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    json.dump(args.func(args), sys.stdout, ensure_ascii=False, indent=2)
+    try:
+        payload = args.func(args)
+    except CommandError as error:
+        sys.stderr.write(f"{error}\n")
+        return CommandError.EXIT_CODE
+    json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")
     return 0
 
