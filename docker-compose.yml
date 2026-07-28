@@ -1,0 +1,22 @@
+x-mm: &mm
+  build: .
+  working_dir: /work
+  volumes:
+    - ./rawdata:/work/rawdata:ro
+    - ./scripts:/work/scripts:ro
+    - ./tests:/work/tests:ro
+    - ./glossary.yaml:/work/glossary.yaml:ro
+    - ./notes:/work/notes
+    - ./records:/work/records
+    - ./output:/work/output
+    - ./templates:/work/templates
+
+services:
+  mm:
+    <<: *mm
+
+  # docker compose run --rm test
+  test:
+    <<: *mm
+    entrypoint: ["pytest"]
+    command: ["/work/tests", "-q"]

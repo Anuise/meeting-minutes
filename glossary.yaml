@@ -1,0 +1,18 @@
+# Glossary：本專案共用的人名、職稱、產品名、縮寫與常見誤譯對照。
+# Extract 時一併送給模型，避免專有名詞被寫錯。
+
+people: {}
+# 例：
+#   王小明: { title: 專案經理, aliases: [小明, Ming] }
+
+products: {}
+# 例：
+#   MoBagel Decanter: { aliases: [Decanter] }
+
+abbreviations: {}
+# 例：
+#   POC: 概念驗證
+
+corrections: {}
+# 例：
+#   決議事項: 決議

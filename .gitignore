@@ -1,0 +1,8 @@
+# 會議內容一律不進版控（客戶資料）
+/rawdata/
+/notes/
+/records/
+/output/
+
+__pycache__/
+.pytest_cache/

@@ -1,0 +1,15 @@
+[project]
+name = "meeting-minutes"
+version = "0.1.0"
+requires-python = "==3.13.*"
+dependencies = [
+    "markitdown[pdf,docx,pptx,xlsx,xls,outlook]",
+    "docxtpl",
+    "python-docx",
+    "jinja2",
+    "pyyaml",
+    "pytest",
+]
+
+[tool.uv]
+package = false
