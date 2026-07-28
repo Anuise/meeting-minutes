@@ -130,10 +130,10 @@ CLI 契約：吃 argv、把結構化結果以 JSON 印到 stdout、錯誤走 exi
 | `mm-schema` | 手動 | 否 |
 | `mm-template` | 手動 | 是 |
 | `mm-minutes` | 手動，主要入口 | 是 |
-| `mm-list` | 手動；也是 `mm-minutes` 選 Meeting 時的清單來源 | 否 |
+| `mm-list` | 手動；也是 `mm-minutes` 選 Meeting 時的清單來源 | 是 |
 | `mm-check` | 手動；`mm-minutes` 在 Render 後自動跑一次 | 是 |
 
-`mm-schema` 與 `mm-list` 不需要容器：前者是純互動地寫 YAML，後者是掃資料夾。
+只有 `mm-schema` 不需要容器——它是純互動地寫 YAML，不執行程式碼。`mm-list` 雖然只是掃資料夾，仍走 `list` 子指令與容器：ADR-0004 零例外，且掃描邏輯留在 CLI 才能被自動化測試涵蓋，也才不會與 `mm-minutes` 的 picker 各寫一份而漂移。
 
 ### 容器
 
