@@ -2,6 +2,8 @@
 
 Raw Material 不接受錄音檔。會議錄音必須先由外部工具轉成逐字稿，才能放進 `rawdata/<meeting>/`。Ingest 遇到 `.mp3` / `.m4a` / `.wav` / `.mp4` 會跳過並提示。
 
+音訊與影片的副檔名清單以 `scripts/mm.py` 的 `AUDIO_SUFFIXES` 為準，**是地板而非窮舉**：清單沒中時還會看 `mimetypes` 猜出來的型別是不是 `audio/*` 或 `video/*`。清單寫死的理由是不讓行為隨基底映像的 mime 表版本漂移；兩層都漏掉的冷門格式會落在 `failed`，使用者仍會看到它、不會被安靜吞掉。
+
 ## 為什麼要記下來
 
 markitdown 的文件明確宣稱支援 "Audio (EXIF metadata and speech transcription)"，未來讀者看到我們排除音訊，合理會認為是漏做而想加回來。實際查證原始碼後，那個支援對會議錄音不成立：

@@ -7,6 +7,7 @@
 
 import argparse
 import json
+import mimetypes
 import sys
 from pathlib import Path
 
@@ -219,9 +220,40 @@ class CommandError(Exception):
     EXIT_CODE = 1  # 2 是 argparse 的用法錯誤，留給它
 
 
-# ADR-0003：不收音訊。錄音必須先由外部工具轉成逐字稿才進得來。
-AUDIO_SUFFIXES = frozenset({".mp3", ".m4a", ".wav", ".mp4"})
-AUDIO_MESSAGE = "不支援音訊。請先自行轉成逐字稿，再把逐字稿放進 rawdata/。"
+# ADR-0003：不收音訊、影片。ADR-0005：不收圖片。
+# 兩份清單是地板——寫死才不會隨基底映像的 mime 表版本漂移；mimetypes 只做補漏。
+AUDIO_SUFFIXES = frozenset(
+    {
+        ".mp3", ".m4a", ".m4b", ".wav", ".flac", ".aac", ".ogg", ".opus",
+        ".wma", ".aiff", ".amr",
+        ".mp4", ".m4v", ".mov", ".mkv", ".avi", ".webm", ".wmv", ".flv",
+    }
+)
+IMAGE_SUFFIXES = frozenset(
+    {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".heic"}
+)
+
+AUDIO_MESSAGE = "不支援音訊與影片。請先自行轉成逐字稿，再把逐字稿放進 rawdata/。"
+IMAGE_MESSAGE = (
+    "不轉圖片：容器內沒有文字辨識能力，轉出來只會是空的 Note。"
+    "照片上的內容需要進會議記錄的話，請自行補一份文字說明放進 rawdata/。"
+)
+
+
+def unsupported_message(raw):
+    """回傳「這個檔案為什麼不轉」；該轉的回 None。"""
+    suffix = raw.suffix.lower()
+    if suffix in AUDIO_SUFFIXES:
+        return AUDIO_MESSAGE
+    if suffix in IMAGE_SUFFIXES:
+        return IMAGE_MESSAGE
+
+    mimetype = mimetypes.guess_type(raw.name)[0] or ""
+    if mimetype.startswith(("audio/", "video/")):
+        return AUDIO_MESSAGE
+    if mimetype.startswith("image/"):
+        return IMAGE_MESSAGE
+    return None
 
 
 def cmd_ingest(args):
@@ -246,8 +278,9 @@ def cmd_ingest(args):
     for raw in sorted(path for path in raw_root.rglob("*") if path.is_file()):
         relative = raw.relative_to(raw_root).as_posix()
 
-        if raw.suffix.lower() in AUDIO_SUFFIXES:
-            unsupported.append({"raw": relative, "message": AUDIO_MESSAGE})
+        message = unsupported_message(raw)
+        if message:
+            unsupported.append({"raw": relative, "message": message})
             continue
 
         # 副檔名留在 Note 檔名裡：看得出來源，且 slides.pdf 與 slides.docx 不會互相蓋掉

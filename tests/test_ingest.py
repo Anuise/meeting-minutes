@@ -17,7 +17,19 @@ MM = Path(__file__).resolve().parent.parent / "scripts" / "mm.py"
 
 MEETING = "2026-07-28-project-weekly"
 
-AUDIO_FILENAMES = ("recording.mp3", "recording.m4a", "recording.wav", "recording.mp4")
+# 前四個是 ADR-0003 點名的副檔名；.flac 只有寫死清單接得到（容器內 mime 表沒有它）；
+# .mpeg 反過來只有 mimetypes 接得到。兩條路徑都要有測試。
+AUDIO_FILENAMES = (
+    "recording.mp3",
+    "recording.m4a",
+    "recording.wav",
+    "recording.mp4",
+    "recording.flac",
+    "recording.mpeg",
+)
+
+# .png 在寫死清單裡，.ico 只有 mimetypes 認得。
+IMAGE_FILENAMES = ("whiteboard.png", "logo.ico")
 
 
 def run_mm(*args):
@@ -46,7 +58,6 @@ def notes_dir(root, meeting=MEETING):
 
 
 # 每個支援格式一個小 fixture，值是轉出來的 Note 裡必須看得到的字串。
-# 圖片沒有值：容器裡沒有 exiftool、也沒有接模型，markitdown 只會產出空內容。
 def write_every_supported_format(directory):
     fixtures.write_pdf(directory / "agenda.pdf", "Quarterly review agenda")
     fixtures.write_docx(directory / "minutes.docx", "上週待辦回顧")
@@ -58,7 +69,6 @@ def write_every_supported_format(directory):
     fixtures.write_xml(directory / "notes.xml", "決議事項")
     fixtures.write_epub(directory / "handbook.epub", "會議守則")
     fixtures.write_msg(directory / "mail.msg", "王小明", "場地確認", "會議室已借到")
-    fixtures.write_png(directory / "whiteboard.png")
 
     return {
         "agenda.pdf": "Quarterly review agenda",
@@ -71,7 +81,6 @@ def write_every_supported_format(directory):
         "notes.xml": "決議事項",
         "handbook.epub": "會議守則",
         "mail.msg": "會議室已借到",
-        "whiteboard.png": None,
     }
 
 
@@ -85,8 +94,7 @@ def test_every_supported_format_becomes_a_note(tmp_path):
     for raw, marker in expected.items():
         note = notes_dir(tmp_path) / ingested[raw]
         assert note.is_file(), f"{raw} 沒有產出 Note"
-        if marker is not None:
-            assert marker in note.read_text(encoding="utf-8")
+        assert marker in note.read_text(encoding="utf-8")
 
 
 def test_note_filename_keeps_the_raw_material_filename(tmp_path):
@@ -125,6 +133,24 @@ def test_audio_is_reported_as_unsupported_with_a_transcript_hint(tmp_path):
         assert "逐字稿" in entry["message"]
 
     # 錄音被跳過，但不影響其他素材，也不留下 Note
+    assert [entry["raw"] for entry in payload["ingested"]] == ["minutes.docx"]
+    assert {path.name for path in notes_dir(tmp_path).iterdir()} == {"minutes.docx.md"}
+
+
+def test_images_are_reported_as_unsupported_and_leave_no_note(tmp_path):
+    raw = rawdata_dir(tmp_path)
+    fixtures.write_png(raw / "whiteboard.png")
+    fixtures.write_png(raw / "logo.ico")  # 內容不重要，這裡測的是副檔名的判定
+    fixtures.write_docx(raw / "minutes.docx", "上週待辦回顧")
+
+    payload = ingest(tmp_path)
+
+    unsupported = {entry["raw"]: entry for entry in payload["unsupported"]}
+    assert set(unsupported) == set(IMAGE_FILENAMES)
+    for entry in unsupported.values():
+        assert "圖片" in entry["message"]
+
+    # 空的 Note 比沒有 Note 更糟：使用者會以為照片的內容進去了
     assert [entry["raw"] for entry in payload["ingested"]] == ["minutes.docx"]
     assert {path.name for path in notes_dir(tmp_path).iterdir()} == {"minutes.docx.md"}
 
@@ -195,6 +221,8 @@ def test_rawdata_is_never_written_to(tmp_path):
     fixtures.write_broken_pdf(raw / "broken.pdf")
     for filename in AUDIO_FILENAMES:
         (raw / filename).write_bytes(b"not really audio")
+    for filename in IMAGE_FILENAMES:
+        fixtures.write_png(raw / filename)
 
     before = snapshot(tmp_path / "rawdata")
     ingest(tmp_path)

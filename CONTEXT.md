@@ -13,7 +13,7 @@ _Avoid_: Project, Session
 ### 資料
 
 **Raw Material**:
-會議留下的原始檔案，未經處理。不含音訊——錄音需先由外部工具轉成逐字稿才進得來。放在 `rawdata/<meeting>/`。
+會議留下的原始檔案，未經處理。不含音訊與圖片——錄音需先由外部工具轉成逐字稿才進得來（ADR-0003），白板照的內容需自行補一份文字說明（ADR-0005）。放在 `rawdata/<meeting>/`。
 _Avoid_: Input, Source file
 
 **Note**:
