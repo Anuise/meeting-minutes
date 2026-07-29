@@ -1,0 +1,39 @@
+# {{ meta.title or '未提及' }}
+
+| 項目 | 內容 |
+| --- | --- |
+| 日期時間 | {{ meta.datetime or '未提及' }} |
+| 地點 | {{ meta.location or '未提及' }} |
+| 主席 | {{ meta.chair or '未提及' }} |
+| 記錄人 | {{ meta.recorder or '未提及' }} |
+| 出席者 | {{ meta.attendees | default([], true) | join('、') or '未提及' }} |
+| 缺席者 | {{ meta.absentees | default([], true) | join('、') or '未提及' }} |
+
+## 議題
+{% for topic in topics | default([], true) %}
+### {{ loop.index }}. {{ topic.title or '未提及' }}
+
+{{ topic.discussion or '未提及' }}
+
+決議：
+{%- for resolution in topic.resolutions | default([], true) %}
+- {{ resolution.text or '未提及' }}（來源：{{ resolution.source or '未提及' }}）
+{%- else %}
+- 未提及
+{%- endfor %}
+{% else %}
+未提及
+{% endfor %}
+## 待辦事項
+
+| 事項 | 負責人 | 期限 | 來源 |
+| --- | --- | --- | --- |
+{%- for item in action_items | default([], true) %}
+| {{ item.task or '未提及' }} | {{ item.owner or '未提及' }} | {{ item.due or '未提及' }} | {{ item.source or '未提及' }} |
+{%- else %}
+| 未提及 | 未提及 | 未提及 | 未提及 |
+{%- endfor %}
+
+## 下次會議
+
+{{ next_meeting or '未提及' }}
