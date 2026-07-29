@@ -146,61 +146,34 @@
     "workflow-pack"
   ],
   "managedFiles": [
-    ".claude/skills/meeting-minutes/SKILL.md",
-    ".agents/skills/meeting-minutes/SKILL.md",
-    ".agents/skills/meeting-minutes/agents/openai.yaml",
     ".claude/identity.json",
     ".codex/config.toml",
     ".codex/AGENTS.md",
     ".codex/agents/explorer.toml",
     ".codex/agents/reviewer.toml",
-    ".codex/agents/docs-researcher.toml",
-    ".claude/homunculus/instincts/inherited/meeting-minutes-instincts.yaml"
+    ".codex/agents/docs-researcher.toml"
   ],
   "packageFiles": {
     "runtime-core": [
-      ".claude/skills/meeting-minutes/SKILL.md",
-      ".agents/skills/meeting-minutes/SKILL.md",
-      ".agents/skills/meeting-minutes/agents/openai.yaml",
       ".claude/identity.json",
       ".codex/config.toml",
       ".codex/AGENTS.md",
       ".codex/agents/explorer.toml",
       ".codex/agents/reviewer.toml",
-      ".codex/agents/docs-researcher.toml",
-      ".claude/homunculus/instincts/inherited/meeting-minutes-instincts.yaml"
+      ".codex/agents/docs-researcher.toml"
     ]
   },
   "moduleFiles": {
     "runtime-core": [
-      ".claude/skills/meeting-minutes/SKILL.md",
-      ".agents/skills/meeting-minutes/SKILL.md",
-      ".agents/skills/meeting-minutes/agents/openai.yaml",
       ".claude/identity.json",
       ".codex/config.toml",
       ".codex/AGENTS.md",
       ".codex/agents/explorer.toml",
       ".codex/agents/reviewer.toml",
-      ".codex/agents/docs-researcher.toml",
-      ".claude/homunculus/instincts/inherited/meeting-minutes-instincts.yaml"
+      ".codex/agents/docs-researcher.toml"
     ]
   },
   "files": [
-    {
-      "moduleId": "runtime-core",
-      "path": ".claude/skills/meeting-minutes/SKILL.md",
-      "description": "Repository-specific Claude Code skill generated from git history."
-    },
-    {
-      "moduleId": "runtime-core",
-      "path": ".agents/skills/meeting-minutes/SKILL.md",
-      "description": "Codex-facing copy of the generated repository skill."
-    },
-    {
-      "moduleId": "runtime-core",
-      "path": ".agents/skills/meeting-minutes/agents/openai.yaml",
-      "description": "Codex skill metadata so the repo skill appears cleanly in the skill interface."
-    },
     {
       "moduleId": "runtime-core",
       "path": ".claude/identity.json",
@@ -230,24 +203,17 @@
       "moduleId": "runtime-core",
       "path": ".codex/agents/docs-researcher.toml",
       "description": "Read-only docs researcher role config for API verification."
-    },
-    {
-      "moduleId": "runtime-core",
-      "path": ".claude/homunculus/instincts/inherited/meeting-minutes-instincts.yaml",
-      "description": "Continuous-learning instincts derived from repository patterns."
     }
   ],
   "workflows": [],
   "adapters": {
     "claudeCode": {
-      "skillPath": ".claude/skills/meeting-minutes/SKILL.md",
       "identityPath": ".claude/identity.json",
       "commandPaths": []
     },
     "codex": {
       "configPath": ".codex/config.toml",
-      "agentsGuidePath": ".codex/AGENTS.md",
-      "skillPath": ".agents/skills/meeting-minutes/SKILL.md"
+      "agentsGuidePath": ".codex/AGENTS.md"
     }
   }
 }
