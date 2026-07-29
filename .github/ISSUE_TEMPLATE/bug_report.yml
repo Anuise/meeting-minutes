@@ -1,0 +1,68 @@
+name: Bug report
+description: 某個階段的行為與預期不符
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        請用 `CONTEXT.md` 的詞彙描述（Raw Material / Note / Minutes Record / Deliverable），
+        不要換成 input / output / 中間產物。
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: 發生在哪個階段
+      options:
+        - Init（建立資料夾骨架與容器映像）
+        - Ingest（Raw Material 轉 Note）
+        - Extract（Note 轉 Minutes Record）
+        - Render（Minutes Record 轉 Deliverable）
+        - List（列出各 Meeting 進度）
+        - Schema（維護 Minutes Schema）
+        - 其他 / 不確定
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 重現步驟
+      description: 指令與檔案狀態。有問題的 Raw Material 檔名與副檔名請一併寫出。
+      placeholder: |
+        1. 把 foo.pptx 放進 rawdata/2026-q3-kickoff/
+        2. 跑 /mm-ingest 2026-q3-kickoff
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 預期行為
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 實際行為
+      description: 錯誤訊息請原文貼上，不要摘要。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: env
+    attributes:
+      label: 執行環境
+      options:
+        - docker compose（ADR-0004 的標準路徑）
+        - 本機直接跑（非標準）
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 其他資訊
+      description: log、相關 `.scratch/<feature-slug>/` 路徑、Minutes Schema 內容。

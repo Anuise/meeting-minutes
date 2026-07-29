@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 領域詞彙與設計決策
+    url: https://github.com/Anuise/meeting-minutes/blob/main/CONTEXT.md
+    about: 開 issue 前先確認用語（Meeting / Note / Minutes Record / Deliverable）與既有 ADR。
