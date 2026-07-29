@@ -1,0 +1,281 @@
+# Instincts generated from https://github.com/Anuise/meeting-minutes
+# Generated: 2026-07-29T01:42:58.929Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: meeting-minutes-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Anuise/meeting-minutes
+---
+
+# Meeting Minutes Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: feat
+
+## Evidence
+
+- 1 commits analyzed
+- Detected conventional commit pattern
+- Examples: feat(list): 每個 Meeting 走到哪一步的 list 子指令與 mm-list skill
+
+---
+id: meeting-minutes-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Anuise/meeting-minutes
+---
+
+# Meeting Minutes Commit Length
+
+## Action
+
+Write moderate-length commit messages (~53 characters)
+
+## Evidence
+
+- Average commit message length: 53 chars
+- Based on 1 commits
+
+---
+id: meeting-minutes-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Anuise/meeting-minutes
+---
+
+# Meeting Minutes Naming Files
+
+## Action
+
+Use camelCase naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: camelCase
+
+---
+id: meeting-minutes-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Anuise/meeting-minutes
+---
+
+# Meeting Minutes Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: meeting-minutes-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Anuise/meeting-minutes
+---
+
+# Meeting Minutes Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: meeting-minutes-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Anuise/meeting-minutes
+---
+
+# Meeting Minutes Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: meeting-minutes-instinct-file-naming-camelCase
+trigger: "When creating a new Python file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Anuise/meeting-minutes
+---
+
+# Meeting Minutes Instinct File Naming CamelCase
+
+## Action
+
+Name the file using camelCase (e.g., myModule.py)
+
+## Evidence
+
+- Pattern in namingConventions.files
+
+---
+id: meeting-minutes-instinct-function-naming-camelCase
+trigger: "When defining a new function"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Anuise/meeting-minutes
+---
+
+# Meeting Minutes Instinct Function Naming CamelCase
+
+## Action
+
+Use camelCase for the function name (e.g., processMeeting())
+
+## Evidence
+
+- Pattern in namingConventions.functions
+
+---
+id: meeting-minutes-instinct-class-naming-pascalCase
+trigger: "When defining a new class"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Anuise/meeting-minutes
+---
+
+# Meeting Minutes Instinct Class Naming PascalCase
+
+## Action
+
+Use PascalCase for the class name (e.g., MeetingManager)
+
+## Evidence
+
+- Pattern in namingConventions.classes
+
+---
+id: meeting-minutes-instinct-constant-naming-screaming-snake-case
+trigger: "When defining a constant"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Anuise/meeting-minutes
+---
+
+# Meeting Minutes Instinct Constant Naming Screaming Snake Case
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for the constant name (e.g., MAX_ATTENDEES)
+
+## Evidence
+
+- Pattern in namingConventions.constants
+
+---
+id: meeting-minutes-instinct-import-style-relative
+trigger: "When importing modules within the package"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Anuise/meeting-minutes
+---
+
+# Meeting Minutes Instinct Import Style Relative
+
+## Action
+
+Use relative imports (e.g., from .module import ClassName)
+
+## Evidence
+
+- Pattern in importStyle
+
+---
+id: meeting-minutes-instinct-export-style-named
+trigger: "When exporting functions or classes"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: Anuise/meeting-minutes
+---
+
+# Meeting Minutes Instinct Export Style Named
+
+## Action
+
+Use named exports (explicitly specify what is exported)
+
+## Evidence
+
+- Pattern in exportStyle
+
+---
+id: meeting-minutes-instinct-test-location-separate-folder
+trigger: "When adding or updating tests"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: Anuise/meeting-minutes
+---
+
+# Meeting Minutes Instinct Test Location Separate Folder
+
+## Action
+
+Place test files in the separate 'tests' folder
+
+## Evidence
+
+- Pattern in architecture.folderStructure.testLocation
+- tests folder present
+
+---
+id: meeting-minutes-instinct-commit-format-conventional-feat
+trigger: "When committing a new feature"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: Anuise/meeting-minutes
+---
+
+# Meeting Minutes Instinct Commit Format Conventional Feat
+
+## Action
+
+Use the conventional commit format with 'feat' prefix (e.g., feat(module): description)
+
+## Evidence
+
+- Pattern in commits.prefixes
+- Seen in commit: 'feat(list): 每個 Meeting 走到哪一步的 list 子指令與 mm-list skill'
+
