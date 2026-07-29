@@ -14,6 +14,7 @@ MM = Path(__file__).resolve().parent.parent / "scripts" / "mm.py"
 
 MEETING = "2026-07-28-project-weekly"
 TEMPLATE = "default.md.j2"
+DOCX_TEMPLATE = "default.docx"
 
 # 一份「有填、有空、有巢狀、有清單」都湊齊的 Minutes Record：
 # 第二則議題與第二筆待辦刻意留空，用來驗證空欄位與未填變數清單。
@@ -92,14 +93,72 @@ def write_template(root, content, name=TEMPLATE):
     return target
 
 
+def write_docx_template(root, paragraphs, name="other.docx"):
+    from docx import Document
+
+    target = root / "templates" / "docx" / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    document = Document()
+    for text in paragraphs:
+        document.add_paragraph(text)
+    document.save(str(target))
+    return target
+
+
 def deliverable(root, meeting=MEETING):
     return root / "output" / meeting / "minutes.md"
 
 
-def render(root, meeting=MEETING, template=TEMPLATE):
-    result = run_mm(
-        "render", meeting, "--markdown-template", template, "--root", str(root)
-    )
+def docx_deliverable(root, meeting=MEETING):
+    return root / "output" / meeting / "minutes.docx"
+
+
+def markdown_content(text):
+    """把 markdown Deliverable 拆成純內容序列，拿掉標題、清單與表格的記號。
+
+    留下的是使用者眼睛真正讀到的字，用來跟 .docx 的內容逐項對帳。
+    """
+    content = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("|"):
+            cells = [cell.strip() for cell in line.strip("|").split("|")]
+            if all(set(cell) == {"-"} for cell in cells):  # 表格的分隔列不是內容
+                continue
+            content.extend(cell for cell in cells if cell)
+            continue
+        content.append(line.lstrip("#").lstrip("- ").strip())
+    return content
+
+
+def docx_content(path):
+    """把 .docx Deliverable 拆成同一種內容序列：段落與表格儲存格，照文件順序。"""
+    from docx import Document
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    document = Document(str(path))
+    content = []
+    for element in document.element.body:
+        if element.tag.endswith("}p"):
+            text = Paragraph(element, document).text.strip()
+            if text:
+                content.append(text)
+        elif element.tag.endswith("}tbl"):
+            for row in Table(element, document).rows:
+                content.extend(
+                    cell.text.strip() for cell in row.cells if cell.text.strip()
+                )
+    return content
+
+
+def render(root, meeting=MEETING, template=TEMPLATE, docx_template=None):
+    args = ["render", meeting, "--markdown-template", template, "--root", str(root)]
+    if docx_template:
+        args += ["--docx-template", docx_template]
+    result = run_mm(*args)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
 
@@ -220,6 +279,115 @@ def test_missing_minutes_record_is_an_error(tmp_path):
 
     assert result.returncode == 1
     assert MEETING in result.stderr
+    assert not (tmp_path / "output" / MEETING).exists()
+
+
+def test_markdown_and_docx_deliverables_carry_the_same_content(tmp_path):
+    # 換一份模板重新產出，兩份 Deliverable 要能互相對帳：
+    # 呈現方式不同，讀到的字必須一模一樣。
+    prepared(tmp_path)
+
+    render(tmp_path, docx_template=DOCX_TEMPLATE)
+
+    markdown = deliverable(tmp_path).read_text(encoding="utf-8")
+    assert docx_content(docx_deliverable(tmp_path)) == markdown_content(markdown)
+
+
+def test_nested_and_list_fields_expand_in_docx(tmp_path):
+    render(prepared(tmp_path), docx_template=DOCX_TEMPLATE)
+
+    content = docx_content(docx_deliverable(tmp_path))
+
+    # 決議掛在自己的議題底下，不是全部倒在一起
+    review = content.index("1. 進度回顧")
+    risk = content.index("2. 風險盤點")
+    assert any("登入頁下週上線" in text for text in content[review:risk])
+    assert not any("登入頁下週上線" in text for text in content[risk:])
+    # 清單型欄位一筆一列
+    assert "補上登入頁的錯誤訊息" in content
+    assert "確認驗收時程" in content
+    assert "notes/2026-07-28-project-weekly/slides.pptx.md#L12" in " ".join(content)
+
+
+def test_blank_fields_render_as_unmentioned_in_docx(tmp_path):
+    render(prepared(tmp_path), docx_template=DOCX_TEMPLATE)
+
+    content = docx_content(docx_deliverable(tmp_path))
+
+    # 空的地點與缺席者、沒有決議的議題、沒填的待辦欄位，全都留下「未提及」
+    assert content[content.index("地點") + 1] == "未提及"
+    assert content[content.index("缺席者") + 1] == "未提及"
+    assert content.count("未提及") == 7
+
+
+def test_unfilled_covers_docx_template_variables(tmp_path):
+    # 未填變數的回報涵蓋兩份模板，不只 Markdown Template
+    prepared(tmp_path)
+    write_docx_template(tmp_path, ["預算：{{ meta.budget or '未提及' }}"])
+
+    payload = render(tmp_path, docx_template="other.docx")
+
+    assert payload["unfilled"] == UNFILLED + ["meta.budget"]
+    assert docx_content(docx_deliverable(tmp_path)) == ["預算：未提及"]
+
+
+def test_docx_template_is_optional(tmp_path):
+    # 不指定 Docx Template 就只出 markdown，這不是錯誤
+    prepared(tmp_path)
+
+    payload = render(tmp_path)
+
+    assert payload["docx_template"] is None
+    assert payload["deliverables"] == [str(deliverable(tmp_path))]
+    assert not docx_deliverable(tmp_path).exists()
+
+
+def test_switching_docx_template_leaves_the_minutes_record_untouched(tmp_path):
+    prepared(tmp_path)
+    record = tmp_path / "records" / f"{MEETING}.yaml"
+    before = record.read_bytes()
+    render(tmp_path, docx_template=DOCX_TEMPLATE)
+    write_docx_template(tmp_path, ["{{ meta.title }}"])
+
+    payload = render(tmp_path, docx_template="other.docx")
+
+    assert record.read_bytes() == before
+    assert docx_content(docx_deliverable(tmp_path)) == ["專案週會"]
+    assert payload["docx_template"] == "other.docx"
+    assert payload["deliverables"] == [
+        str(deliverable(tmp_path)),
+        str(docx_deliverable(tmp_path)),
+    ]
+
+
+def test_xml_special_characters_survive_the_docx(tmp_path):
+    # .docx 內容是 XML，值裡的 & 與 < 要被跳脫，否則整份檔案打不開
+    init(tmp_path)
+    write_record(tmp_path, "meta:\n  title: R&D <內部> 週會\n")
+    write_docx_template(tmp_path, ["{{ meta.title }}"])
+
+    render(tmp_path, docx_template="other.docx")
+
+    assert docx_content(docx_deliverable(tmp_path)) == ["R&D <內部> 週會"]
+
+
+def test_missing_docx_template_is_an_error(tmp_path):
+    prepared(tmp_path)
+
+    result = run_mm(
+        "render",
+        MEETING,
+        "--markdown-template",
+        TEMPLATE,
+        "--docx-template",
+        "nope.docx",
+        "--root",
+        str(tmp_path),
+    )
+
+    assert result.returncode == 1
+    assert "nope.docx" in result.stderr
+    # 一份都不寫：markdown 不該因為 .docx 缺席而先落地
     assert not (tmp_path / "output" / MEETING).exists()
 
 

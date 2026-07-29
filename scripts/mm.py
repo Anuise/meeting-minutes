@@ -129,14 +129,21 @@ DOCX_ACTION_COLUMNS = (
 
 
 def write_default_docx(target):
-    """產生一份已標上 Jinja2 變數、能被 docxtpl 直接渲染的 default Docx Template。"""
+    """產生一份已標上 Jinja2 變數、能被 docxtpl 直接渲染的 default Docx Template。
+
+    內容逐項對齊 default Markdown Template：同一份 Minutes Record 套這兩份模板，
+    兩份 Deliverable 上讀到的字要一模一樣，使用者才對得了帳。
+    """
     from docx import Document
 
     document = Document()
     document.add_paragraph("{{ meta.title or '未提及' }}", style="Title")
 
-    meta_table = document.add_table(rows=0, cols=2)
+    meta_table = document.add_table(rows=1, cols=2)
     meta_table.style = "Table Grid"
+    meta_header = meta_table.rows[0].cells
+    meta_header[0].text = "項目"
+    meta_header[1].text = "內容"
     for label, expression in DOCX_META_ROWS:
         cells = meta_table.add_row().cells
         cells[0].text = label
@@ -146,15 +153,20 @@ def write_default_docx(target):
     document.add_paragraph("{%p for topic in topics | default([], true) %}")
     document.add_heading("{{ loop.index }}. {{ topic.title or '未提及' }}", level=2)
     document.add_paragraph("{{ topic.discussion or '未提及' }}")
+    document.add_paragraph("決議：")
     document.add_paragraph(
         "{%p for resolution in topic.resolutions | default([], true) %}"
     )
     document.add_paragraph(
-        "決議：{{ resolution.text or '未提及' }}"
-        "（來源：{{ resolution.source or '未提及' }}）",
+        "{{ resolution.text or '未提及' }}（來源：{{ resolution.source or '未提及' }}）",
         style="List Bullet",
     )
+    # 沒有決議的議題也要留下痕跡，跟 markdown 一樣落一行「未提及」
+    document.add_paragraph("{%p else %}")
+    document.add_paragraph("未提及", style="List Bullet")
     document.add_paragraph("{%p endfor %}")
+    document.add_paragraph("{%p else %}")
+    document.add_paragraph("未提及")
     document.add_paragraph("{%p endfor %}")
 
     document.add_heading("待辦事項", level=1)
@@ -169,6 +181,9 @@ def write_default_docx(target):
     repeated_row = action_table.add_row().cells
     for index, (_, expression) in enumerate(DOCX_ACTION_COLUMNS):
         repeated_row[index].text = expression
+    action_table.add_row().cells[0].text = "{%tr else %}"
+    for cell in action_table.add_row().cells:
+        cell.text = "未提及"
     action_table.add_row().cells[0].text = "{%tr endfor %}"
 
     document.add_heading("下次會議", level=1)
@@ -378,11 +393,12 @@ def blank(value):
     return value is None
 
 
-def render_markdown(template_text, data, unfilled):
-    """渲染 markdown，並把渲染時讀到的空欄位路徑收進 unfilled。
+def build_environment(data, unfilled, **options):
+    """建出會記下未填變數的 Jinja2 環境，以及它要吃的 context。
 
     未填變數以「模板真的讀到」為準——那才是 Deliverable 上看得到的空格。
     Minutes Record 裡有但模板沒用到的欄位不算，模板問了而 Minutes Record 沒有的算。
+    兩種模板共用這一套，所以 unfilled 涵蓋 Markdown 與 Docx Template 兩邊的變數。
     """
     from jinja2 import ChainableUndefined, Environment
 
@@ -414,15 +430,34 @@ def render_markdown(template_text, data, unfilled):
             return [wrap(item, f"{path}[{index}]") for index, item in enumerate(value)]
         return value
 
-    environment = Environment(undefined=Unfilled, keep_trailing_newline=True)
+    environment = Environment(undefined=Unfilled, **options)
     # 空的最上層欄位不放進 context，留給 Unfilled 去接：
     # 這樣它只在模板真的讀到時才被記下來，順序也跟著模板的閱讀順序。
     context = {key: wrap(value, key) for key, value in data.items() if not blank(value)}
+    return environment, context
+
+
+def render_markdown(template_text, data, unfilled):
+    """把 Minutes Record 套上 Markdown Template，回傳 markdown 內容。"""
+    environment, context = build_environment(data, unfilled, keep_trailing_newline=True)
     return environment.from_string(template_text).render(context)
 
 
+def render_docx(template, target, data, unfilled):
+    """把 Minutes Record 套上 Docx Template，寫出 .docx。
+
+    autoescape 是必要的：.docx 的內容是 XML，值裡的 & 與 < 沒跳脫就整份打不開。
+    """
+    from docxtpl import DocxTemplate
+
+    environment, context = build_environment(data, unfilled, autoescape=True)
+    document = DocxTemplate(str(template))
+    document.render(context, environment)
+    document.save(str(target))
+
+
 def cmd_render(args):
-    """把 Minutes Record 套上 Markdown Template，寫出 Deliverable。
+    """把 Minutes Record 套上 Markdown Template 與（選填的）Docx Template，寫出 Deliverable。
 
     不呼叫模型，只讀 records/ 與 templates/、只寫 output/，跑幾次結果都一樣。
     """
@@ -440,6 +475,15 @@ def cmd_render(args):
         raise CommandError(
             f"找不到 Markdown Template：templates/markdown/{args.markdown_template}"
         )
+    # 沒指定 Docx Template 就只出 markdown，那不是錯誤。
+    # 兩份模板都在寫檔前先查，缺一份就一份都不落地。
+    docx_template = None
+    if args.docx_template:
+        docx_template = root / "templates" / "docx" / args.docx_template
+        if not docx_template.is_file():
+            raise CommandError(
+                f"找不到 Docx Template：templates/docx/{args.docx_template}"
+            )
 
     # Minutes Record 允許人工編修，所以壞掉的 YAML 是使用者修得好的錯誤，不是 bug。
     # BaseLoader 讓所有純量都留在字串：日期與時間照 Minutes Record 上的寫法渲染，
@@ -457,12 +501,19 @@ def cmd_render(args):
     deliverable = root / "output" / args.meeting / "minutes.md"
     deliverable.parent.mkdir(parents=True, exist_ok=True)
     deliverable.write_text(markdown, encoding="utf-8")
+    deliverables = [deliverable]
+
+    if docx_template:
+        docx_deliverable = deliverable.parent / "minutes.docx"
+        render_docx(docx_template, docx_deliverable, data, unfilled)
+        deliverables.append(docx_deliverable)
 
     return {
         "meeting": args.meeting,
         "minutes_record": str(record),
         "markdown_template": args.markdown_template,
-        "deliverables": [str(deliverable)],
+        "docx_template": args.docx_template,
+        "deliverables": [str(path) for path in deliverables],
         "unfilled": unfilled,
     }
 
@@ -500,6 +551,10 @@ def build_parser():
         "--markdown-template",
         required=True,
         help="templates/markdown/ 底下的檔名，例如 default.md.j2",
+    )
+    render.add_argument(
+        "--docx-template",
+        help="templates/docx/ 底下的檔名，例如 default.docx。不給就只產 markdown",
     )
     render.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
     render.set_defaults(func=cmd_render)

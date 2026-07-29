@@ -1,6 +1,6 @@
 ---
 name: mm-minutes
-description: 產出一場 Meeting 的會議記錄 —— 從清單選 Meeting、Minutes Schema 與 Markdown Template，需要時自動補跑 Ingest，讀 Note 抽出 Minutes Record，再渲染成 markdown Deliverable，最後回報有哪些變數沒被填到。這是主要入口；Minutes Record 已存在時只重新 Render，不重抽。
+description: 產出一場 Meeting 的會議記錄 —— 從清單選 Meeting、Minutes Schema、Markdown Template 與（選填的）Docx Template，需要時自動補跑 Ingest，讀 Note 抽出 Minutes Record，再渲染成 markdown 與（有選才有的）.docx Deliverable，最後回報有哪些變數沒被填到。這是主要入口；Minutes Record 已存在時只重新 Render，不重抽。
 ---
 
 # mm-minutes
@@ -19,7 +19,7 @@ docker info
 
 > Docker daemon 沒有回應。請先啟動 Docker Desktop，等它的狀態變成 Running，再重新執行 mm-minutes。這個專案的所有程式都在容器內執行，宿主端不會安裝任何 Python 套件。
 
-## 2. 取得清單，讓使用者選三樣東西
+## 2. 取得清單，讓使用者選四樣東西
 
 ```bash
 docker compose run --rm mm list
@@ -27,15 +27,14 @@ docker compose run --rm mm list
 
 清單來源與 `mm-list` 完全相同，不要自己去 `ls` 資料夾——兩邊會漂移。
 
-要選的三樣，都**從清單挑，不要讓使用者手打**：
+要選的四樣，都**從清單挑，不要讓使用者手打**：
 
 1. **Meeting** —— 從 `meetings` 挑。報給使用者時帶上每場的階段狀態（有沒有 Note、有沒有 Minutes Record），他才知道自己在選什麼。使用者已經指名了就不用問。
 2. **Minutes Schema** —— 從 `schemas` 挑。只有一套就直接用，說一句「用 default.yaml」即可，不必問。
 3. **Markdown Template** —— 從 `markdown_templates` 挑。同上。
+4. **Docx Template** —— 從 `docx_templates` 挑，**選項裡一定要明確包含「不使用」**。這一項與前三項不同：預設是不用，使用者沒表示就不產 .docx。只有一份可用時仍然要問，因為「要不要 .docx」是使用者的決定，不是清單長度的結果。
 
 `meetings` 是空的就請使用者把素材放進 `rawdata/<meeting>/`（建議 `YYYY-MM-DD-短描述`），不要幫他建空資料夾。三份模板清單都空的代表還沒跑過 `mm-init`。
-
-這一片只產出 markdown。**不要**問使用者要不要 Docx Template。
 
 ## 3. 需要時補跑 Ingest
 
@@ -81,8 +80,10 @@ Minutes Record 的形狀（與 `mm-schema` 的規則一致）：`meta` 底下的
 ## 5. Render
 
 ```bash
-docker compose run --rm mm render <meeting> --markdown-template <template>
+docker compose run --rm mm render <meeting> --markdown-template <template> --docx-template <docx>
 ```
+
+使用者選了「不使用」就**整個省略 `--docx-template`**，不要傳空字串。
 
 stdout 是 JSON：
 
@@ -91,12 +92,20 @@ stdout 是 JSON：
   "meeting": "2026-07-28-project-weekly",
   "minutes_record": "/work/records/2026-07-28-project-weekly.yaml",
   "markdown_template": "default.md.j2",
-  "deliverables": ["/work/output/2026-07-28-project-weekly/minutes.md"],
+  "docx_template": "default.docx",
+  "deliverables": [
+    "/work/output/2026-07-28-project-weekly/minutes.md",
+    "/work/output/2026-07-28-project-weekly/minutes.docx"
+  ],
   "unfilled": ["meta.location", "action_items[1].owner"]
 }
 ```
 
-`unfilled` 是**模板讀到卻沒被填到的變數路徑**，順序就是它們在 Deliverable 上出現的順序。它包含兩種情況：Minutes Record 裡是空的，以及 Minutes Record 裡根本沒有這個欄位（模板與 Schema 不強制綁定）。每一項在 Deliverable 上都是一個「未提及」。
+沒用 Docx Template 時 `docx_template` 是 `null`，`deliverables` 只有 markdown 那一項。
+
+`unfilled` 是**模板讀到卻沒被填到的變數路徑**，順序就是它們在 Deliverable 上出現的順序。它涵蓋兩份模板——Markdown Template 的在前，Docx Template 才問到的接在後面。它包含兩種情況：Minutes Record 裡是空的，以及 Minutes Record 裡根本沒有這個欄位（模板與 Schema 不強制綁定）。每一項在 Deliverable 上都是一個「未提及」。
+
+兩份 Deliverable 的內容出自同一份 Minutes Record，可以互相對帳。換一份 Docx Template 重跑只是重新 Render，不重抽、也不會動到 Minutes Record。
 
 Render 不呼叫模型，只讀 `records/` 與 `templates/`、只寫 `output/`。整個刪掉 `output/<meeting>/` 再重跑，內容完全一樣。
 
@@ -106,13 +115,14 @@ Render 不呼叫模型，只讀 `records/` 與 `templates/`、只寫 `output/`�
 
 1. 有沒有自動補跑 Ingest（有就明說，並列出轉了哪幾個檔）。
 2. Extract 是新抽的，還是沿用既有的 Minutes Record。
-3. Deliverable 在哪裡：`output/<meeting>/minutes.md`。
+3. Deliverable 在哪裡：`output/<meeting>/minutes.md`，有選 Docx Template 的話再加 `output/<meeting>/minutes.docx`。
 4. `unfilled` 逐項列出來，用使用者看得懂的說法（`meta.location` → 「地點」，`action_items[1].owner` → 「第 2 筆待辦的負責人」），並說明這些格子在 Deliverable 上顯示為「未提及」。**不要**建議由你把它們補滿。
 
 接著告訴使用者兩條路：
 
 - 內容要改（錯字、補負責人）→ 直接編 `records/<meeting>.yaml`，再重跑 `mm-minutes`。它只會重新 Render，不會重抽。
 - 素材有新增或更正 → 補進 `rawdata/<meeting>/`，然後明確要求重抽（`--reextract`）。**只補素材重跑是不會納入新素材的**，因為預設不重抽。
+- 要換一份樣板 → 重跑 `mm-minutes` 換選一份 Docx Template 即可。不重抽、不重讀素材。
 
 ## 邊界
 
@@ -121,4 +131,5 @@ Render 不呼叫模型，只讀 `records/` 與 `templates/`、只寫 `output/`�
 - 不要寫入 `rawdata/`，也不要改 `notes/` 裡的 Note。要修內容就改 Minutes Record。
 - 不要改 `templates/` 底下的東西。Schema 要調整轉給 `mm-schema`。
 - 不要自己轉錄音訊或讀圖補內容，理由見 `docs/adr/0003-no-audio-ingest.md` 與 `docs/adr/0005-no-image-ingest.md`。
-- 這一片只產 markdown。.docx Deliverable 由後續 ticket 帶進來，現在不要嘗試產出，也不要用別的工具硬轉。
+- .docx 只由 `--docx-template` 產出。使用者選了「不使用」就是不產，不要用別的工具硬轉，也不要「順便」補一份。
+- 要把客戶給的 .docx 變成可渲染的 Docx Template（打洞）不是這個 skill 的事，轉給 `mm-template`。
