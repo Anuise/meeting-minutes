@@ -437,6 +437,30 @@ def build_environment(data, unfilled, **options):
     return environment, context
 
 
+def load_record(root, meeting, action):
+    """讀 Minutes Record，回傳 (路徑, 內容)。
+
+    Minutes Record 允許人工編修，所以缺檔與壞掉的 YAML 都是使用者修得好的錯誤，
+    不是 bug。BaseLoader 讓所有純量都留在字串：日期與時間照 Minutes Record 上的
+    寫法處理，不會被 YAML 的時間戳規則改寫成另一種格式。
+    """
+    import yaml
+
+    record = root / "records" / f"{meeting}.yaml"
+    if not record.is_file():
+        raise CommandError(
+            f"找不到 Minutes Record：records/{meeting}.yaml。"
+            f"先做 Extract 產出它，再來 {action}。"
+        )
+    try:
+        data = yaml.load(record.read_text(encoding="utf-8"), yaml.BaseLoader) or {}
+    except yaml.YAMLError as error:
+        raise CommandError(f"Minutes Record 不是合法的 YAML：{error}") from error
+    if not isinstance(data, dict):
+        raise CommandError("Minutes Record 的最上層必須是欄位，例如 meta:、topics:。")
+    return record, data
+
+
 def render_markdown(template_text, data, unfilled):
     """把 Minutes Record 套上 Markdown Template，回傳 markdown 內容。"""
     environment, context = build_environment(data, unfilled, keep_trailing_newline=True)
@@ -461,15 +485,8 @@ def cmd_render(args):
 
     不呼叫模型，只讀 records/ 與 templates/、只寫 output/，跑幾次結果都一樣。
     """
-    import yaml
-
     root = Path(args.root)
-    record = root / "records" / f"{args.meeting}.yaml"
-    if not record.is_file():
-        raise CommandError(
-            f"找不到 Minutes Record：records/{args.meeting}.yaml。"
-            "先做 Extract 產出它，再來 Render。"
-        )
+    record, data = load_record(root, args.meeting, "Render")
     template = root / "templates" / "markdown" / args.markdown_template
     if not template.is_file():
         raise CommandError(
@@ -484,16 +501,6 @@ def cmd_render(args):
             raise CommandError(
                 f"找不到 Docx Template：templates/docx/{args.docx_template}"
             )
-
-    # Minutes Record 允許人工編修，所以壞掉的 YAML 是使用者修得好的錯誤，不是 bug。
-    # BaseLoader 讓所有純量都留在字串：日期與時間照 Minutes Record 上的寫法渲染，
-    # 不會被 YAML 的時間戳規則改寫成另一種格式。
-    try:
-        data = yaml.load(record.read_text(encoding="utf-8"), yaml.BaseLoader) or {}
-    except yaml.YAMLError as error:
-        raise CommandError(f"Minutes Record 不是合法的 YAML：{error}") from error
-    if not isinstance(data, dict):
-        raise CommandError("Minutes Record 的最上層必須是欄位，例如 meta:、topics:。")
 
     unfilled = []
     markdown = render_markdown(template.read_text(encoding="utf-8"), data, unfilled)
@@ -518,9 +525,305 @@ def cmd_render(args):
     }
 
 
+def schema_fields(entries):
+    """把 Minutes Schema 的一段欄位定義攤成 key -> 節點。
+
+    節點帶 label（訊息要指名到欄位）、type（`source` 型別另外歸類）與子欄位。
+    """
+    fields = {}
+    for entry in entries or []:
+        key = entry.get("key")
+        if key:
+            fields[key] = {
+                "label": entry.get("label", key),
+                "type": entry.get("type", "text"),
+                "fields": schema_fields(entry.get("fields")),
+            }
+    return fields
+
+
+def load_schema(path):
+    """讀 Minutes Schema，回傳與 Minutes Record 同形狀的欄位樹。
+
+    `meta` 在 Minutes Record 裡收在 `meta.<key>` 底下，`body` 底下的區塊則攤平在
+    最上層——這裡照同一個形狀組，路徑才對得上 Minutes Record 與模板變數。
+    """
+    import yaml
+
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as error:
+        raise CommandError(f"Minutes Schema 不是合法的 YAML：{error}") from error
+    if not isinstance(document, dict):
+        raise CommandError("Minutes Schema 的最上層必須是欄位，例如 meta:、body:。")
+
+    fields = {}
+    meta = schema_fields(document.get("meta"))
+    if meta:
+        fields["meta"] = {"label": "會議資訊", "type": "block", "fields": meta}
+    fields.update(schema_fields(document.get("body")))
+    if not fields:
+        raise CommandError("Minutes Schema 沒有定義任何欄位，meta: 與 body: 都是空的。")
+    return fields
+
+
+def scan_record(fields, data, path, owner, blank_fields, missing_source):
+    """依 Minutes Schema 逐個欄位看 Minutes Record 填了沒。
+
+    以 Schema 為準而不是以 Minutes Record 為準：Minutes Record 裡根本沒有的欄位
+    才是最容易被漏掉的那一種。`owner` 是所在清單項目的說法（例如「決議」第 2 筆），
+    缺 source 的訊息要靠它指名到是哪一筆。
+    """
+    for key, node in fields.items():
+        value = data.get(key) if isinstance(data, dict) else None
+        here = f"{path}.{key}" if path else key
+
+        if blank(value):
+            if node["type"] == "source":
+                # 缺 source 比一般空欄位嚴重：查不回 Note，別人質疑時無從對證
+                where = owner or f"「{node['label']}」"
+                missing_source.append(
+                    {
+                        "path": here,
+                        "label": node["label"],
+                        "message": (
+                            f"Minutes Record 的{where}沒有 source，指不回 Note：{here}"
+                        ),
+                    }
+                )
+            else:
+                blank_fields.append(
+                    {
+                        "path": here,
+                        "label": node["label"],
+                        "message": f"Minutes Record 的「{node['label']}」是空的：{here}",
+                    }
+                )
+            continue
+
+        if node["type"] == "list":
+            for index, item in enumerate(value if isinstance(value, list) else []):
+                scan_record(
+                    node["fields"],
+                    item,
+                    f"{here}[{index}]",
+                    f"「{node['label']}」第 {index + 1} 筆",
+                    blank_fields,
+                    missing_source,
+                )
+        elif node["fields"]:
+            scan_record(node["fields"], value, here, owner, blank_fields, missing_source)
+
+
+# Jinja2 自己提供的名字，不是 Minutes Record 的欄位，別拿去跟 Minutes Schema 對帳
+JINJA_GLOBALS = frozenset(
+    {"loop", "range", "dict", "lipsum", "cycler", "joiner", "namespace"}
+)
+
+
+def resolve_path(node, scope):
+    """把一段運算式化成 (模板上的寫法, Minutes Schema 上的欄位路徑)。
+
+    迴圈變數換回它迭代的清單，所以 `resolution.text` 會解到
+    `topics.resolutions.text`——那才是拿去跟 Minutes Schema 對帳的東西。
+    解不出來的（例如 `{% set %}` 綁出來的名字）欄位路徑回 None，代表不該報。
+    """
+    from jinja2 import nodes
+
+    if isinstance(node, nodes.Name):
+        return node.name, scope[node.name] if node.name in scope else node.name
+    if isinstance(node, nodes.Getattr):
+        written, field = resolve_path(node.node, scope)
+        if written is None:
+            return None, None
+        return f"{written}.{node.attr}", f"{field}.{node.attr}" if field else None
+    if isinstance(node, nodes.Filter):
+        # `topic.resolutions | default([], true)` 問的還是 topic.resolutions
+        return resolve_path(node.node, scope) if node.node else (None, None)
+    return None, None
+
+
+def target_names(node):
+    """`{% for topic in ... %}` 或 `{% set a, b = ... %}` 綁出來的名字。"""
+    from jinja2 import nodes
+
+    if isinstance(node, nodes.Name):
+        return [node.name]
+    return [child.name for child in node.find_all(nodes.Name)]
+
+
+def add_reference(written, field, references):
+    """記下模板讀到的一個欄位。
+
+    去重要連欄位路徑一起看：兩個迴圈都把變數叫 `item`、迭代的卻是不同清單時，
+    那是兩筆不同的參照，併成一筆會讓其中一份模板的問題被靜默漏掉。
+    """
+    if written.split(".")[0] in JINJA_GLOBALS:
+        return
+    reference = {"variable": written, "field": field}
+    if reference not in references:
+        references.append(reference)
+
+
+def scan_template_node(node, scope, references):
+    """走 Jinja2 的語法樹，收集模板真的讀到的欄位路徑。
+
+    只收最深的那一層：`meta.title` 記一筆，不會連 `meta` 也記一筆。
+    解不出欄位路徑的寫法（索引運算式、`{% set %}` 綁的名字）就繼續往下走——
+    外層寫法特別不該讓底下的變數整棵被漏掉。
+    """
+    from jinja2 import nodes
+
+    if isinstance(node, nodes.For):
+        written, field = resolve_path(node.iter, scope)
+        if field:
+            add_reference(written, field, references)
+        else:
+            scan_template_node(node.iter, scope, references)
+        inner = dict(scope)
+        for name in target_names(node.target):
+            inner[name] = field
+        for child in ([node.test] if node.test else []) + node.body + node.else_:
+            scan_template_node(child, inner, references)
+        return
+
+    if isinstance(node, nodes.Assign):
+        scan_template_node(node.node, scope, references)
+        # `{% set %}` 綁出來的名字不是 Minutes Record 的欄位，別誤報
+        for name in target_names(node.target):
+            scope[name] = None
+        return
+
+    if isinstance(node, (nodes.Name, nodes.Getattr)):
+        written, field = resolve_path(node, scope)
+        if field:
+            add_reference(written, field, references)
+            return
+
+    for child in node.iter_child_nodes():
+        scan_template_node(child, scope, references)
+
+
+def unmapped(fields, field):
+    """這條欄位路徑在 Minutes Schema 裡找不到對應嗎。"""
+    for key in field.split("."):
+        node = fields.get(key)
+        if node is None:
+            return True
+        fields = node["fields"]
+    return False
+
+
+def docx_template_source(path):
+    """把 Docx Template 攤成 docxtpl 真正拿去渲染的那串 Jinja2 原始碼。
+
+    含頁首頁尾——客戶樣板常把會議名稱放在頁首，那裡的變數對不到 schema 一樣是空格。
+    """
+    from docxtpl import DocxTemplate
+
+    template = DocxTemplate(str(path))
+    template.init_docx()
+    source = template.patch_xml(template.get_xml())
+    for uri in (template.HEADER_URI, template.FOOTER_URI):
+        for _, part in template.get_headers_footers(uri):
+            source += template.patch_xml(template.get_part_xml(part))
+    return source
+
+
+def scan_template(source, name, kind, label, fields, schema, findings):
+    """列出這份模板裡對不到 Minutes Schema 的變數。
+
+    訊息要同時指名變數、模板與 schema：三者不強制綁定，少講一個使用者就查不下去。
+    """
+    from jinja2 import Environment
+
+    references = []
+    scan_template_node(Environment().parse(source), {}, references)
+
+    for reference in references:
+        variable, field = reference["variable"], reference["field"]
+        if not unmapped(fields, field):
+            continue
+        written = variable if variable == field else f"{variable}（欄位路徑 {field}）"
+        findings.append(
+            {
+                "template": name,
+                "kind": kind,
+                "variable": variable,
+                "field": field,
+                "message": (
+                    f"{label}「{name}」用到的變數 {written}，"
+                    f"在 Minutes Schema「{schema}」裡找不到對應欄位。"
+                ),
+            }
+        )
+
+
+def cmd_check(args):
+    """交付前的清單：空欄位、缺 source、模板變數對不到 Minutes Schema。
+
+    只讀不寫，只列清單不阻擋——有發現也照樣 exit 0，由使用者自己判斷。
+    """
+    root = Path(args.root)
+    record, data = load_record(root, args.meeting, "Check")
+    schema = root / "templates" / "schema" / args.schema
+    if not schema.is_file():
+        raise CommandError(f"找不到 Minutes Schema：templates/schema/{args.schema}")
+    template = root / "templates" / "markdown" / args.markdown_template
+    if not template.is_file():
+        raise CommandError(
+            f"找不到 Markdown Template：templates/markdown/{args.markdown_template}"
+        )
+    # 沒指定 Docx Template 就只查 Markdown Template，那不是錯誤。
+    docx_template = None
+    if args.docx_template:
+        docx_template = root / "templates" / "docx" / args.docx_template
+        if not docx_template.is_file():
+            raise CommandError(
+                f"找不到 Docx Template：templates/docx/{args.docx_template}"
+            )
+
+    fields = load_schema(schema)
+
+    blank_fields = []
+    missing_source = []
+    scan_record(fields, data, "", None, blank_fields, missing_source)
+
+    unmapped_variables = []
+    scan_template(
+        template.read_text(encoding="utf-8"),
+        args.markdown_template,
+        "markdown",
+        "Markdown Template",
+        fields,
+        args.schema,
+        unmapped_variables,
+    )
+    if docx_template:
+        scan_template(
+            docx_template_source(docx_template),
+            args.docx_template,
+            "docx",
+            "Docx Template",
+            fields,
+            args.schema,
+            unmapped_variables,
+        )
+
+    return {
+        "meeting": args.meeting,
+        "minutes_record": str(record),
+        "schema": args.schema,
+        "markdown_template": args.markdown_template,
+        "docx_template": args.docx_template,
+        "blank_fields": blank_fields,
+        "missing_source": missing_source,
+        "unmapped_variables": unmapped_variables,
+    }
+
+
 PLANNED_SUBCOMMANDS = """\
 尚未實作的子指令（各自由後續 ticket 帶進來）：
-  check         列出空欄位、缺 source、模板變數對不到 schema
   scan-docx     列出 Docx Source 的段落與表格儲存格供打洞
   apply-docx    依對照表把 Docx Source 打洞成 Docx Template
 """
@@ -558,6 +861,27 @@ def build_parser():
     )
     render.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
     render.set_defaults(func=cmd_render)
+
+    check = subparsers.add_parser(
+        "check", help="列出空欄位、缺 source、模板變數對不到 Minutes Schema"
+    )
+    check.add_argument("meeting", help="Meeting slug，即 records/ 底下的檔名（不含 .yaml）")
+    check.add_argument(
+        "--schema",
+        required=True,
+        help="templates/schema/ 底下的檔名，例如 default.yaml",
+    )
+    check.add_argument(
+        "--markdown-template",
+        required=True,
+        help="templates/markdown/ 底下的檔名，例如 default.md.j2",
+    )
+    check.add_argument(
+        "--docx-template",
+        help="templates/docx/ 底下的檔名，例如 default.docx。不給就只查 markdown",
+    )
+    check.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
+    check.set_defaults(func=cmd_check)
 
     listing = subparsers.add_parser("list", help="回報每個 Meeting 進行到哪一步")
     listing.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
