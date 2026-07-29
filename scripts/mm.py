@@ -313,13 +313,68 @@ def cmd_ingest(args):
     }
 
 
+def has_files(directory):
+    """這一階段真的做過嗎。空資料夾不算——使用者建了資料夾但還沒放東西。"""
+    return directory.is_dir() and any(path.is_file() for path in directory.rglob("*"))
+
+
+def filenames(directory, pattern):
+    if not directory.is_dir():
+        return []
+    return sorted(
+        path.name
+        for path in directory.glob(pattern)
+        # 使用者在 Word 裡開著模板時會留下 ~$ 開頭的鎖檔，那不是模板
+        if path.is_file() and not path.name.startswith("~$")
+    )
+
+
+def cmd_list(args):
+    """回報每個 Meeting 走到哪一步，以及目前有哪些 schema 與模板可用。
+
+    只讀不寫。骨架還沒建起來也不算錯——回空清單就好。
+    """
+    root = Path(args.root)
+
+    # 四個階段目錄各自獨立：只要任何一個有這個 slug，這場 Meeting 就得被列出來
+    slugs = set()
+    for area in ("rawdata", "notes", "output"):
+        area_root = root / area
+        if area_root.is_dir():
+            slugs.update(path.name for path in area_root.iterdir() if path.is_dir())
+    records_root = root / "records"
+    if records_root.is_dir():
+        slugs.update(path.stem for path in records_root.glob("*.yaml") if path.is_file())
+
+    meetings = [
+        {
+            "slug": slug,
+            "raw_material": has_files(root / "rawdata" / slug),
+            "note": has_files(root / "notes" / slug),
+            "minutes_record": (root / "records" / f"{slug}.yaml").is_file(),
+            "deliverable": has_files(root / "output" / slug),
+        }
+        for slug in sorted(slugs)
+    ]
+
+    return {
+        "root": str(root),
+        "meetings": meetings,
+        # 三個清單都按副檔名過濾，跟 init 產出的 default 對齊：
+        # README、.gitkeep、Word 的鎖檔不該被當成可用模板交給 render
+        "schemas": filenames(root / "templates" / "schema", "*.yaml"),
+        "markdown_templates": filenames(root / "templates" / "markdown", "*.j2"),
+        # docx-source 底下的還沒打洞，不能拿來渲染，所以不算可用模板
+        "docx_templates": filenames(root / "templates" / "docx", "*.docx"),
+    }
+
+
 PLANNED_SUBCOMMANDS = """\
 尚未實作的子指令（各自由後續 ticket 帶進來）：
   render        把 Minutes Record 套模板變成 Deliverable
   check         列出空欄位、缺 source、模板變數對不到 schema
   scan-docx     列出 Docx Source 的段落與表格儲存格供打洞
   apply-docx    依對照表把 Docx Source 打洞成 Docx Template
-  list          回報每個 Meeting 進行到哪一步
 """
 
 
@@ -341,6 +396,10 @@ def build_parser():
     ingest.add_argument("meeting", help="Meeting slug，即 rawdata/ 底下的資料夾名稱")
     ingest.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
     ingest.set_defaults(func=cmd_ingest)
+
+    listing = subparsers.add_parser("list", help="回報每個 Meeting 進行到哪一步")
+    listing.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
+    listing.set_defaults(func=cmd_list)
 
     return parser
 

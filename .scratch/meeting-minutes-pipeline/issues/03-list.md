@@ -8,7 +8,9 @@
 
 **Status:** ready-for-agent
 
-- [ ] `list` 子指令加入 CLI，回傳結構化 JSON：每個 Meeting 的 slug 與四個階段的完成狀態，以及可用的 Minutes Schema、Markdown Template、Docx Template 清單。
-- [ ] `mm-list` skill 可手動呼叫，透過容器執行（與其他 skill 一致，無例外），開頭做 Docker daemon 健康檢查。
-- [ ] 各種完成度的 fixture 目錄都回報正確的階段狀態：只有 Raw Material、有 Note 沒 Record、有 Record 沒 Deliverable、全部完成、空目錄。
-- [ ] 一個 Meeting 只出現在 `notes/` 或 `records/` 而 `rawdata/` 沒有對應目錄時，仍被列出且狀態正確——不是被漏掉。
+- [x] `list` 子指令加入 CLI，回傳結構化 JSON：每個 Meeting 的 slug 與四個階段的完成狀態，以及可用的 Minutes Schema、Markdown Template、Docx Template 清單。
+- [x] `mm-list` skill 可手動呼叫，透過容器執行（與其他 skill 一致，無例外），開頭做 Docker daemon 健康檢查。
+- [x] 各種完成度的 fixture 目錄都回報正確的階段狀態：只有 Raw Material、有 Note 沒 Record、有 Record 沒 Deliverable、全部完成、空目錄。
+- [x] 一個 Meeting 只出現在 `notes/` 或 `records/` 而 `rawdata/` 沒有對應目錄時，仍被列出且狀態正確——不是被漏掉。
+
+三份模板清單按副檔名過濾（`schema/*.yaml`、`markdown/*.j2`、`docx/*.docx`，排除 Word 的 `~$` 鎖檔）：README、`.gitkeep`、鎖檔混進清單會被後續的 `render` 當成模板拿去用。
