@@ -109,7 +109,21 @@ stdout 是 JSON：
 
 Render 不呼叫模型，只讀 `records/` 與 `templates/`、只寫 `output/`。整個刪掉 `output/<meeting>/` 再重跑，內容完全一樣。
 
-## 6. 回報
+## 6. 交付前的檢查
+
+Render 之後**一定要**跑一次，用第 2 步選定的同一組 schema 與模板，不要重問使用者：
+
+```bash
+docker compose run --rm mm check <meeting> --schema <schema> --markdown-template <template> --docx-template <docx>
+```
+
+沒選 Docx Template 就一樣省略 `--docx-template`。
+
+它回三份清單：`blank_fields`（Minutes Record 有哪些欄位是空的）、`missing_source`（哪些決議或待辦缺 source）、`unmapped_variables`（模板裡有哪些變數在選定的 Minutes Schema 中找不到對應）。每一項都附一句寫好的 `message`，照著念即可。
+
+**有發現也是 exit 0，不要當成失敗**：檢查只列清單、不阻擋流程，Deliverable 已經產出來了。清單的讀法與後續處置見 `mm-check`。
+
+## 7. 回報
 
 按順序講，一句一件事：
 
@@ -117,6 +131,7 @@ Render 不呼叫模型，只讀 `records/` 與 `templates/`、只寫 `output/`�
 2. Extract 是新抽的，還是沿用既有的 Minutes Record。
 3. Deliverable 在哪裡：`output/<meeting>/minutes.md`，有選 Docx Template 的話再加 `output/<meeting>/minutes.docx`。
 4. `unfilled` 逐項列出來，用使用者看得懂的說法（`meta.location` → 「地點」，`action_items[1].owner` → 「第 2 筆待辦的負責人」），並說明這些格子在 Deliverable 上顯示為「未提及」。**不要**建議由你把它們補滿。
+5. 檢查的三份清單。`missing_source` 與 `unmapped_variables` 是 `unfilled` 沒講到的兩件事，一定要講；`blank_fields` 與 `unfilled` 多半重疊，只補上 `unfilled` 沒有的那幾項就好，不要把同一個空格講兩遍。三份都空就講一句「檢查沒有發現」。
 
 接著告訴使用者兩條路：
 

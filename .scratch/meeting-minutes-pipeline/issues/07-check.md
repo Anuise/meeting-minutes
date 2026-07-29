@@ -10,10 +10,10 @@ Render 完成後自動跑一次，也可以單獨手動呼叫。
 
 **Status:** ready-for-agent
 
-- [ ] `check` 子指令加入 CLI，回傳結構化 JSON。
-- [ ] `mm-check` skill 可手動呼叫；`mm-minutes` 在 Render 後自動跑一次並顯示結果。
-- [ ] 偵測 Minutes Record 的空欄位，正例與反例各有測試。
-- [ ] 偵測缺少 `source` 的決議與待辦，正例與反例各有測試。
-- [ ] 偵測模板變數在 Minutes Schema 中找不到對應，正例與反例各有測試；Markdown Template 與 Docx Template 都涵蓋。
-- [ ] 訊息指名到變數、模板與 schema 三者，不是籠統的「有變數對不到」。
-- [ ] 測試斷言：即使有發現，exit code 仍為 0——回報而不阻擋。
+- [x] `check` 子指令加入 CLI，回傳結構化 JSON。
+- [x] `mm-check` skill 可手動呼叫；`mm-minutes` 在 Render 後自動跑一次並顯示結果。
+- [x] 偵測 Minutes Record 的空欄位，正例與反例各有測試。
+- [x] 偵測缺少 `source` 的決議與待辦，正例與反例各有測試。
+- [x] 偵測模板變數在 Minutes Schema 中找不到對應，正例與反例各有測試；Markdown Template 與 Docx Template 都涵蓋。
+- [x] 訊息指名到變數、模板與 schema 三者，不是籠統的「有變數對不到」。
+- [x] 測試斷言：即使有發現，exit code 仍為 0——回報而不阻擋。
