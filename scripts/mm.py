@@ -369,9 +369,106 @@ def cmd_list(args):
     }
 
 
+def blank(value):
+    """這個欄位沒被填到嗎。Extract 抓不到的欄位一律留空，各種「空」在這裡收斂成一個判斷。"""
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, dict)):
+        return not value
+    return value is None
+
+
+def render_markdown(template_text, data, unfilled):
+    """渲染 markdown，並把渲染時讀到的空欄位路徑收進 unfilled。
+
+    未填變數以「模板真的讀到」為準——那才是 Deliverable 上看得到的空格。
+    Minutes Record 裡有但模板沒用到的欄位不算，模板問了而 Minutes Record 沒有的算。
+    """
+    from jinja2 import ChainableUndefined, Environment
+
+    class Unfilled(ChainableUndefined):
+        """沒填到的變數。渲染成空字串（模板的 `or '未提及'` 接手），並記下自己的路徑。"""
+
+        def __init__(self, *args, name=None, **kwargs):
+            super().__init__(*args, name=name, **kwargs)
+            if name and name not in unfilled:
+                unfilled.append(name)
+
+    class Block(dict):
+        """Minutes Record 的一個區塊。子欄位在被模板讀到的那一刻才判斷有沒有填。"""
+
+        def __init__(self, fields, path):
+            super().__init__(fields)
+            self._path = path
+
+        def __getitem__(self, key):
+            # 缺 key 與填了空值一視同仁：模板問了，Deliverable 上就是一個空格
+            return wrap(self.get(key), f"{self._path}.{key}")
+
+    def wrap(value, path):
+        if blank(value):
+            return Unfilled(name=path)
+        if isinstance(value, dict):
+            return Block(value, path)
+        if isinstance(value, list):
+            return [wrap(item, f"{path}[{index}]") for index, item in enumerate(value)]
+        return value
+
+    environment = Environment(undefined=Unfilled, keep_trailing_newline=True)
+    # 空的最上層欄位不放進 context，留給 Unfilled 去接：
+    # 這樣它只在模板真的讀到時才被記下來，順序也跟著模板的閱讀順序。
+    context = {key: wrap(value, key) for key, value in data.items() if not blank(value)}
+    return environment.from_string(template_text).render(context)
+
+
+def cmd_render(args):
+    """把 Minutes Record 套上 Markdown Template，寫出 Deliverable。
+
+    不呼叫模型，只讀 records/ 與 templates/、只寫 output/，跑幾次結果都一樣。
+    """
+    import yaml
+
+    root = Path(args.root)
+    record = root / "records" / f"{args.meeting}.yaml"
+    if not record.is_file():
+        raise CommandError(
+            f"找不到 Minutes Record：records/{args.meeting}.yaml。"
+            "先做 Extract 產出它，再來 Render。"
+        )
+    template = root / "templates" / "markdown" / args.markdown_template
+    if not template.is_file():
+        raise CommandError(
+            f"找不到 Markdown Template：templates/markdown/{args.markdown_template}"
+        )
+
+    # Minutes Record 允許人工編修，所以壞掉的 YAML 是使用者修得好的錯誤，不是 bug。
+    # BaseLoader 讓所有純量都留在字串：日期與時間照 Minutes Record 上的寫法渲染，
+    # 不會被 YAML 的時間戳規則改寫成另一種格式。
+    try:
+        data = yaml.load(record.read_text(encoding="utf-8"), yaml.BaseLoader) or {}
+    except yaml.YAMLError as error:
+        raise CommandError(f"Minutes Record 不是合法的 YAML：{error}") from error
+    if not isinstance(data, dict):
+        raise CommandError("Minutes Record 的最上層必須是欄位，例如 meta:、topics:。")
+
+    unfilled = []
+    markdown = render_markdown(template.read_text(encoding="utf-8"), data, unfilled)
+
+    deliverable = root / "output" / args.meeting / "minutes.md"
+    deliverable.parent.mkdir(parents=True, exist_ok=True)
+    deliverable.write_text(markdown, encoding="utf-8")
+
+    return {
+        "meeting": args.meeting,
+        "minutes_record": str(record),
+        "markdown_template": args.markdown_template,
+        "deliverables": [str(deliverable)],
+        "unfilled": unfilled,
+    }
+
+
 PLANNED_SUBCOMMANDS = """\
 尚未實作的子指令（各自由後續 ticket 帶進來）：
-  render        把 Minutes Record 套模板變成 Deliverable
   check         列出空欄位、缺 source、模板變數對不到 schema
   scan-docx     列出 Docx Source 的段落與表格儲存格供打洞
   apply-docx    依對照表把 Docx Source 打洞成 Docx Template
@@ -396,6 +493,16 @@ def build_parser():
     ingest.add_argument("meeting", help="Meeting slug，即 rawdata/ 底下的資料夾名稱")
     ingest.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
     ingest.set_defaults(func=cmd_ingest)
+
+    render = subparsers.add_parser("render", help="把 Minutes Record 套模板變成 Deliverable")
+    render.add_argument("meeting", help="Meeting slug，即 records/ 底下的檔名（不含 .yaml）")
+    render.add_argument(
+        "--markdown-template",
+        required=True,
+        help="templates/markdown/ 底下的檔名，例如 default.md.j2",
+    )
+    render.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
+    render.set_defaults(func=cmd_render)
 
     listing = subparsers.add_parser("list", help="回報每個 Meeting 進行到哪一步")
     listing.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
