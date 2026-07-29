@@ -8,6 +8,7 @@
 import argparse
 import json
 import mimetypes
+import re
 import sys
 from pathlib import Path
 
@@ -518,11 +519,203 @@ def cmd_render(args):
     }
 
 
+def containers(document):
+    """所有可能藏著文字的容器：本文，以及有自己定義的頁首頁尾。
+
+    首頁與偶數頁的頁首頁尾各自獨立，得逐個問。`is_linked_to_previous` 的沒有自己的
+    定義（內容來自前一節），碰它只會憑空生出一份空頁首，所以跳過。
+    """
+    yield "body", document
+    for section in document.sections:
+        parts = (
+            ("header", section.header),
+            ("header", section.first_page_header),
+            ("header", section.even_page_header),
+            ("footer", section.footer),
+            ("footer", section.first_page_footer),
+            ("footer", section.even_page_footer),
+        )
+        for where, part in parts:
+            if not part.is_linked_to_previous:
+                yield where, part
+
+
+def walk(container, where, cell=None):
+    """走訪一個容器裡的所有段落，帶著它在文件上的位置。
+
+    表格儲存格與巢狀表格都涵蓋。`cell` 是最內層儲存格的 (表格, 列, 欄)。
+    """
+    for paragraph in container.paragraphs:
+        yield where, cell, paragraph
+    for index, table in enumerate(container.tables):
+        # 存元素本身而不是 id()：lxml 的 proxy 被回收後位址會被下一個元素重用，
+        # 拿 id() 當鍵會把不同的儲存格誤認成同一個而漏掉。
+        seen = set()
+        for row_index, row in enumerate(table.rows):
+            for column_index, current in enumerate(row.cells):
+                # 合併過的儲存格會在同一列裡重複出現，同一個 <w:tc> 只走一次
+                if current._tc in seen:
+                    continue
+                seen.add(current._tc)
+                yield from walk(current, where, (index, row_index, column_index))
+
+
+def walk_document(document):
+    for where, container in containers(document):
+        yield from walk(container, where)
+
+
+def open_docx_source(root, name):
+    from docx import Document
+
+    source = root / "templates" / "docx-source" / name
+    if not source.is_file():
+        raise CommandError(f"找不到 Docx Source：templates/docx-source/{name}")
+    return source, Document(str(source))
+
+
+def cmd_scan_docx(args):
+    """列出 Docx Source 上的每一段文字，供 agent 判斷哪些是變動欄位。
+
+    只讀不寫。文字以段落為單位——Word 把一句話拆成幾個 run 是它的事，
+    使用者眼裡那是一句話，對照表上也該是一句話。
+    """
+    root = Path(args.root)
+    source, document = open_docx_source(root, args.source)
+
+    items = []
+    seen = set()
+    for where, cell, paragraph in walk_document(document):
+        text = paragraph.text.strip()
+        # 對照表以文字為鍵，重複的文字列第二次只是噪音
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        item = {"where": where, "kind": "cell" if cell else "paragraph", "text": text}
+        if cell:
+            item |= {"table": cell[0], "row": cell[1], "column": cell[2]}
+        items.append(item)
+
+    return {"source": args.source, "path": str(source), "items": items}
+
+
+def read_mapping(stream):
+    """從 stdin 讀最終的變數對照表。
+
+    對照表的長度沒有上限，塞進 argv 遲早會炸，所以走 stdin——仍然完全非互動。
+    """
+    raw = stream.read().decode("utf-8")
+    if not raw.strip():
+        raise CommandError(
+            "對照表是空的。apply-docx 從 stdin 讀 JSON，"
+            '格式為 [{"text": "原文", "variable": "{{ 變數 }}"}]。'
+        )
+    try:
+        entries = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise CommandError(f"對照表不是合法的 JSON：{error}") from error
+
+    if not isinstance(entries, list) or not entries:
+        raise CommandError("對照表必須是至少一項的 JSON 陣列。")
+
+    mapping = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise CommandError(f"對照表的每一項都必須是物件，收到：{entry!r}")
+        text = entry.get("text")
+        variable = entry.get("variable")
+        if not isinstance(text, str) or not text.strip():
+            raise CommandError(f"對照表有一項缺少 text 或 text 是空的：{entry!r}")
+        if not isinstance(variable, str) or not variable.strip():
+            raise CommandError(f"對照表有一項缺少 variable：{entry!r}")
+        # 同一段原文對到兩個變數，該聽誰的？寧可停下來讓使用者決定
+        if text in mapping:
+            raise CommandError(f"對照表裡同一段原文出現兩次：{text}")
+        mapping[text] = variable
+
+    return mapping
+
+
+def punch(paragraph, pattern, mapping):
+    """就地把段落裡的原文換成 Jinja2 變數，回傳這一段打掉了哪些原文。
+
+    先在段落層級合併 run 再替換：Word 常把一句話拆成好幾個 run，
+    不合併的話跨 run 的字串永遠比對不到。代價是段落內各 run 的差異
+    （例如標籤粗體、值不粗體）會被第一個 run 的格式統一掉。
+
+    段落的文字有一部分不在 run 裡（超連結、內容控制項）時整段跳過：合併只搬得動
+    run，硬做會把那些文字擠到別的位置去。那些原文會出現在 unmatched 裡，
+    使用者看得到自己有一段沒被打洞。
+    """
+    runs = paragraph.runs
+    text = "".join(run.text for run in runs)
+    if text != paragraph.text:
+        return []
+
+    hits = pattern.findall(text)
+    if not hits:
+        return []
+
+    runs[0].text = pattern.sub(lambda match: mapping[match.group(0)], text)
+    for run in runs[1:]:
+        run.text = ""
+    return hits
+
+
+def cmd_apply_docx(args):
+    """依對照表把 Docx Source 打洞成 Docx Template，輸出到 templates/docx/。
+
+    只讀 templates/docx-source/、只寫 templates/docx/：原檔一個位元都不動，
+    使用者隨時能改一改對照表重新來過。頁首頁尾、logo、字型與表格樣式都留在原地，
+    因為打洞只換段落裡的文字，不重建文件。
+    """
+    from collections import Counter
+
+    root = Path(args.root)
+    output = args.output or args.source
+    if not output.endswith(".docx"):
+        raise CommandError(f"Docx Template 的檔名必須以 .docx 結尾：{output}")
+
+    source, document = open_docx_source(root, args.source)
+    mapping = read_mapping(sys.stdin.buffer)
+
+    target = root / "templates" / "docx" / output
+    if target.exists() and not args.force:
+        raise CommandError(
+            f"templates/docx/{output} 已經存在。"
+            "換一個 --output 名稱，或加 --force 覆蓋它。"
+        )
+
+    # 長的原文先比對：不然「王小明」會先吃掉「王小明副總」的前三個字。
+    # 一次 sub 掃完整段，剛換上去的 {{ 變數 }} 不會再被後面的原文比到。
+    pattern = re.compile(
+        "|".join(re.escape(text) for text in sorted(mapping, key=len, reverse=True))
+    )
+
+    counts = Counter()
+    for _, _, paragraph in walk_document(document):
+        counts.update(punch(paragraph, pattern, mapping))
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    document.save(str(target))
+
+    return {
+        "source": args.source,
+        "path": str(source),
+        "docx_template": str(target),
+        "replaced": [
+            {"text": text, "variable": variable, "count": counts[text]}
+            for text, variable in mapping.items()
+            if counts[text]
+        ],
+        # 對不到的原文要講出來：使用者以為那一格打了洞，其實原文還留在模板上
+        "unmatched": [text for text in mapping if not counts[text]],
+    }
+
+
 PLANNED_SUBCOMMANDS = """\
 尚未實作的子指令（各自由後續 ticket 帶進來）：
   check         列出空欄位、缺 source、模板變數對不到 schema
-  scan-docx     列出 Docx Source 的段落與表格儲存格供打洞
-  apply-docx    依對照表把 Docx Source 打洞成 Docx Template
 """
 
 
@@ -558,6 +751,27 @@ def build_parser():
     )
     render.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
     render.set_defaults(func=cmd_render)
+
+    scan_docx = subparsers.add_parser(
+        "scan-docx", help="列出 Docx Source 的段落與表格儲存格供打洞"
+    )
+    scan_docx.add_argument("source", help="templates/docx-source/ 底下的檔名")
+    scan_docx.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
+    scan_docx.set_defaults(func=cmd_scan_docx)
+
+    apply_docx = subparsers.add_parser(
+        "apply-docx",
+        help="依對照表把 Docx Source 打洞成 Docx Template（對照表走 stdin）",
+    )
+    apply_docx.add_argument("source", help="templates/docx-source/ 底下的檔名")
+    apply_docx.add_argument(
+        "--output", help="輸出到 templates/docx/ 的檔名，預設與 Docx Source 同名"
+    )
+    apply_docx.add_argument(
+        "--force", action="store_true", help="覆蓋已存在的 Docx Template"
+    )
+    apply_docx.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
+    apply_docx.set_defaults(func=cmd_apply_docx)
 
     listing = subparsers.add_parser("list", help="回報每個 Meeting 進行到哪一步")
     listing.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
