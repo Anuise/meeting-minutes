@@ -13,8 +13,20 @@ _Avoid_: Project, Session
 ### 資料
 
 **Raw Material**:
-會議留下的原始檔案，未經處理。不含音訊與圖片——錄音需先由外部工具轉成逐字稿才進得來（ADR-0003），白板照的內容需自行補一份文字說明（ADR-0005）。放在 `rawdata/<meeting>/`。
+會議留下的原始檔案，未經處理。錄音與錄影直接放得進來，由 Transcribe 變成 Note（ADR-0006）。不含圖片——白板照的內容需自行補一份文字說明（ADR-0005）。放在 `rawdata/<meeting>/`。
 _Avoid_: Input, Source file
+
+**Recording**:
+Raw Material 裡的音訊或影片檔。唯一需要經過外部服務才能變成 Note 的素材。
+_Avoid_: 音檔, Audio, 錄音檔
+
+**Media**:
+Recording 轉出來、實際送去轉錄的 mp3。可拋棄，隨時可從 Recording 重建。放在 `media/<meeting>/`。
+_Avoid_: 音檔, Audio file, 中繼檔
+
+**Transcription Task**:
+ASR Service 上的一個轉錄任務，非同步——送出與取回之間可能隔上數十分鐘。
+_Avoid_: Job, Transcription job, 轉檔任務
 
 **Note**:
 Raw Material 轉成的 markdown。是抽取階段唯一讀得到的素材形式。放在 `notes/<meeting>/`。
@@ -53,6 +65,10 @@ _Avoid_: Doc template, Word template
 _Avoid_: Doc template rawdata, Raw template
 
 ### 動作
+
+**Transcribe**:
+把 Recording 變成 Note。分 Submit（轉出 Media 並送上 ASR Service）與 Fetch（取回逐字稿落成 Note）兩步，**不呼叫模型**——Extract 仍是唯一呼叫模型的步驟。
+_Avoid_: Transcription, ASR, 轉錄音檔
 
 **Ingest**:
 把 Raw Material 轉成 Note。純機械轉檔，不涉及理解。
