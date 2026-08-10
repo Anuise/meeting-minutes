@@ -252,7 +252,10 @@ IMAGE_SUFFIXES = frozenset(
     {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".heic"}
 )
 
-AUDIO_MESSAGE = "不支援音訊與影片。請先自行轉成逐字稿，再把逐字稿放進 rawdata/。"
+AUDIO_MESSAGE = (
+    "Ingest 不轉音訊與影片，它只做機械轉檔。錄音交給 Transcribe 處理"
+    "（跑 mm-transcribe），不必自己先轉成逐字稿。理由見 ADR-0006。"
+)
 IMAGE_MESSAGE = (
     "不轉圖片：容器內沒有文字辨識能力，轉出來只會是空的 Note。"
     "照片上的內容需要進會議記錄的話，請自行補一份文字說明放進 rawdata/。"
@@ -702,6 +705,18 @@ def filenames(directory, pattern):
     )
 
 
+def has_pending_recording(root, slug):
+    """這場 Meeting 還有 Recording 沒變成 Note 嗎。"""
+    raw_root = root / "rawdata" / slug
+    if not raw_root.is_dir():
+        return False
+    note_root = root / "notes" / slug
+    return any(
+        not (note_root / f"{recording.relative_to(raw_root).as_posix()}.md").is_file()
+        for recording in recordings(raw_root)
+    )
+
+
 def cmd_list(args):
     """回報每個 Meeting 走到哪一步，以及目前有哪些 schema 與模板可用。
 
@@ -723,6 +738,8 @@ def cmd_list(args):
         {
             "slug": slug,
             "raw_material": has_files(root / "rawdata" / slug),
+            # 卡在 Transcribe 的那一場：有錄音，但還沒變成 Note
+            "pending_recording": has_pending_recording(root, slug),
             "note": has_files(root / "notes" / slug),
             "minutes_record": (root / "records" / f"{slug}.yaml").is_file(),
             "deliverable": has_files(root / "output" / slug),

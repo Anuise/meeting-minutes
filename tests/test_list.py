@@ -91,6 +91,21 @@ def test_every_completeness_reports_the_right_stages(tmp_path):
         assert actual == stages, f"{slug} 的階段狀態不對"
 
 
+def test_recording_without_a_note_is_reported_as_pending(tmp_path):
+    write(tmp_path / "rawdata" / "01-recording-only" / "morning.mp3", "假裝是錄音")
+
+    write(tmp_path / "rawdata" / "02-recording-transcribed" / "morning.mp3", "假裝是錄音")
+    write(tmp_path / "notes" / "02-recording-transcribed" / "morning.mp3.md", "逐字稿")
+
+    make_raw_material(tmp_path, "03-no-recording")
+
+    meetings = meetings_by_slug(tmp_path)
+
+    assert meetings["01-recording-only"]["pending_recording"] is True
+    assert meetings["02-recording-transcribed"]["pending_recording"] is False
+    assert meetings["03-no-recording"]["pending_recording"] is False
+
+
 def test_meetings_are_sorted_by_slug(tmp_path):
     for slug in ("2026-07-28-weekly", "2026-01-05-kickoff", "2026-03-11-review"):
         make_raw_material(tmp_path, slug)

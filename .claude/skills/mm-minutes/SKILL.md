@@ -1,13 +1,13 @@
 ---
 name: mm-minutes
-description: 產出一場 Meeting 的會議記錄 —— 從清單選 Meeting、Minutes Schema、Markdown Template 與（選填的）Docx Template，需要時自動補跑 Ingest，讀 Note 抽出 Minutes Record，再渲染成 markdown 與（有選才有的）.docx Deliverable，最後回報有哪些變數沒被填到。這是主要入口；Minutes Record 已存在時只重新 Render，不重抽。
+description: 產出一場 Meeting 的會議記錄 —— 從清單選 Meeting、Minutes Schema、Markdown Template 與（選填的）Docx Template，需要時自動補跑 Transcribe 與 Ingest，讀 Note 抽出 Minutes Record，再渲染成 markdown 與（有選才有的）.docx Deliverable，最後回報有哪些變數沒被填到。這是主要入口；Minutes Record 已存在時只重新 Render，不重抽。
 ---
 
 # mm-minutes
 
-主要入口。一次走完 Ingest（需要時）→ Extract（需要時）→ Render。
+主要入口。一次走完 Transcribe（需要時）→ Ingest（需要時）→ Extract（需要時）→ Render。
 
-三個階段的分工要記牢：**Extract 是唯一呼叫模型的步驟**，由你做；Ingest 與 Render 是容器裡的確定性程式，由 CLI 做。Minutes Record 是唯一的內容真實來源（ADR-0002），使用者手動改過的內容絕不能被機器蓋掉。
+分工要記牢：**Extract 是唯一呼叫模型的步驟**，由你做；Transcribe、Ingest 與 Render 是容器裡的確定性程式，由 CLI 做。Minutes Record 是唯一的內容真實來源（ADR-0002），使用者手動改過的內容絕不能被機器蓋掉。
 
 ## 1. 先確認 Docker daemon
 
@@ -36,7 +36,22 @@ docker compose run --rm mm list
 
 `meetings` 是空的就請使用者把素材放進 `rawdata/<meeting>/`（建議 `YYYY-MM-DD-短描述`），不要幫他建空資料夾。三份模板清單都空的代表還沒跑過 `mm-init`。
 
-## 3. 需要時補跑 Ingest
+## 3. 需要時先補跑 Transcribe
+
+選定的 Meeting 在清單裡 `pending_recording: true` 時，**先做這一步**——有錄音還沒變成 Note，直接往下做 Ingest 會漏掉一場會議資訊密度最高的素材。
+
+```bash
+docker compose run --rm mm transcribe-submit <meeting>
+docker compose run --rm mm transcribe-fetch <meeting>
+```
+
+Fetch 的 `pending` 還有東西就隔一段時間再跑一次，**每次都把進度講給使用者聽**（`progress_pct`、`completed_chunks / total_chunks`），不要沉默地等。一小時的會議可能遠超過十分鐘，這是常態，不是卡住。
+
+清單、判讀與失敗處置的完整規則見 `mm-transcribe`，這裡不重複。`pending_recording: false` 就**整個跳過這一步**，沒有錄音的 Meeting 一行都不受影響。
+
+`pending` 與 `failed` 都清空之後才往下走。
+
+## 4. 需要時補跑 Ingest
 
 選定的 Meeting 在清單裡 `raw_material: true` 時，直接跑一次：
 
@@ -54,9 +69,9 @@ docker compose run --rm mm ingest <meeting>
 
 `raw_material: false` 但 `note: true`（使用者刪了 Raw Material，或直接拿到別人的 Note）→ **跳過這一步**，不要跑 ingest，它會因為找不到目錄而非零退出。兩者都是 false 就停手，請使用者先放素材。
 
-## 4. Extract：讀 Note 產出 Minutes Record
+## 5. Extract：讀 Note 產出 Minutes Record
 
-`records/<meeting>.yaml` **已存在**時：**不要 Extract**。明說一句「沿用既有 Minutes Record（`records/<meeting>.yaml`）」，直接跳到第 5 步。使用者花時間校對過的內容不會被機器蓋掉，這是刻意的。
+`records/<meeting>.yaml` **已存在**時：**不要 Extract**。明說一句「沿用既有 Minutes Record（`records/<meeting>.yaml`）」，直接跳到第 6 步。使用者花時間校對過的內容不會被機器蓋掉，這是刻意的。
 
 只有使用者**明確要求重抽**（說 `--reextract`、「重抽」、「重新 Extract」）時才重跑 Extract，覆蓋既有的 Minutes Record。重抽前先講清楚：他手動改過的內容會被蓋掉。
 
@@ -77,7 +92,7 @@ Minutes Record 的形狀（與 `mm-schema` 的規則一致）：`meta` 底下的
 
 寫檔用 `records/<meeting>.yaml`，**不要**寫進 `output/`——`output/` 隨時可以整個刪掉重建，Minutes Record 不行。
 
-## 5. Render
+## 6. Render
 
 ```bash
 docker compose run --rm mm render <meeting> --markdown-template <template> --docx-template <docx>
@@ -109,7 +124,7 @@ stdout 是 JSON：
 
 Render 不呼叫模型，只讀 `records/` 與 `templates/`、只寫 `output/`。整個刪掉 `output/<meeting>/` 再重跑，內容完全一樣。
 
-## 6. 交付前的檢查
+## 7. 交付前的檢查
 
 Render 之後**一定要**跑一次，用第 2 步選定的同一組 schema 與模板，不要重問使用者：
 
@@ -123,11 +138,11 @@ docker compose run --rm mm check <meeting> --schema <schema> --markdown-template
 
 **有發現也是 exit 0，不要當成失敗**：檢查只列清單、不阻擋流程，Deliverable 已經產出來了。清單的讀法與後續處置見 `mm-check`。
 
-## 7. 回報
+## 8. 回報
 
 按順序講，一句一件事：
 
-1. 有沒有自動補跑 Ingest（有就明說，並列出轉了哪幾個檔）。
+1. 有沒有自動補跑 Transcribe 與 Ingest（有就明說，並列出轉了哪幾份錄音、哪幾個檔）。
 2. Extract 是新抽的，還是沿用既有的 Minutes Record。
 3. Deliverable 在哪裡：`output/<meeting>/minutes.md`，有選 Docx Template 的話再加 `output/<meeting>/minutes.docx`。
 4. `unfilled` 逐項列出來，用使用者看得懂的說法（`meta.location` → 「地點」，`action_items[1].owner` → 「第 2 筆待辦的負責人」），並說明這些格子在 Deliverable 上顯示為「未提及」。**不要**建議由你把它們補滿。
@@ -145,6 +160,6 @@ docker compose run --rm mm check <meeting> --schema <schema> --markdown-template
 - 不要在宿主端安裝任何 Python 套件、不要建 venv、不要繞過容器直接跑 `scripts/mm.py`。理由見 `docs/adr/0004-all-code-runs-in-docker-compose.md`。
 - 不要寫入 `rawdata/`，也不要改 `notes/` 裡的 Note。要修內容就改 Minutes Record。
 - 不要改 `templates/` 底下的東西。Schema 要調整轉給 `mm-schema`。
-- 不要自己轉錄音訊或讀圖補內容，理由見 `docs/adr/0003-no-audio-ingest.md` 與 `docs/adr/0005-no-image-ingest.md`。
+- 不要自己用別的工具硬轉錄音——錄音走 Transcribe（`docs/adr/0006-transcribe-recordings-via-asr-service.md`）。也不要自己讀圖補內容，理由見 `docs/adr/0005-no-image-ingest.md`。
 - .docx 只由 `--docx-template` 產出。使用者選了「不使用」就是不產，不要用別的工具硬轉，也不要「順便」補一份。
 - 要把客戶給的 .docx 變成可渲染的 Docx Template（打洞）不是這個 skill 的事，轉給 `mm-template`。

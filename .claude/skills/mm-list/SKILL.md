@@ -32,6 +32,7 @@ stdout 是 JSON：
     {
       "slug": "2026-07-28-project-weekly",
       "raw_material": true,
+      "pending_recording": false,
       "note": true,
       "minutes_record": false,
       "deliverable": false
@@ -46,6 +47,7 @@ stdout 是 JSON：
 四個階段旗標的意思：
 
 - `raw_material`：`rawdata/<slug>/` 底下有檔案。
+- `pending_recording`：`rawdata/<slug>/` 底下有錄音或錄影，而它還沒變成 Note。這場會議卡在 Transcribe，下一步跑 `mm-transcribe`。這一項與四個階段旗標不同，它看的是「有沒有東西還沒做」，不是「這一階段做過沒有」。
 - `note`：`notes/<slug>/` 底下有檔案（Ingest 做過了）。
 - `minutes_record`：`records/<slug>.yaml` 存在（Extract 做過了）。
 - `deliverable`：`output/<slug>/` 底下有檔案（Render 做過了）。
@@ -62,6 +64,7 @@ stdout 是 JSON：
 
 按階段講人話，重點是「下一步該做什麼」：
 
+- `pending_recording: true` → 先跑 `mm-transcribe`，錄音變成 Note 之後再往下。
 - 只有 Raw Material → 下一步跑 `mm-ingest`。
 - 有 Note 沒 Minutes Record → 下一步跑 `mm-minutes`（它會做 Extract 與 Render）。
 - 有 Minutes Record 沒 Deliverable → 跑 `mm-minutes`，它只會重新 Render，不會重跑 Extract。

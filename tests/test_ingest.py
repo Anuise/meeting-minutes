@@ -130,7 +130,8 @@ def test_audio_is_reported_as_unsupported_with_a_transcript_hint(tmp_path):
     unsupported = {entry["raw"]: entry for entry in payload["unsupported"]}
     assert set(unsupported) == set(AUDIO_FILENAMES)
     for entry in unsupported.values():
-        assert "逐字稿" in entry["message"]
+        # 訊息指向 Transcribe，不再叫使用者自己去找轉錄工具（ADR-0006）
+        assert "Transcribe" in entry["message"]
 
     # 錄音被跳過，但不影響其他素材，也不留下 Note
     assert [entry["raw"] for entry in payload["ingested"]] == ["minutes.docx"]
