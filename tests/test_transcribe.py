@@ -400,6 +400,99 @@ def test_fetch_before_submit_exits_nonzero(tmp_path, asr):
     assert MEETING in result.stderr
 
 
+# --- 失敗韌性 ----------------------------------------------------------------
+
+
+def test_a_failed_chunk_leaves_a_warning_instead_of_a_blank(tmp_path, asr):
+    task = submit_one(tmp_path, asr)
+    asr.finish(
+        task,
+        [
+            (0.0, 60.0, "聽得清楚的那一段"),
+            (60.0, 120.0, None, "chunk decode failed"),
+        ],
+    )
+
+    payload = fetch(tmp_path, asr)
+
+    assert payload["fetched"][0]["failed_chunks"] == 1
+    # 有失敗分段的 Note 要列出來，不能安靜吞掉
+    assert payload["degraded"] == ["morning.wav.md"]
+
+    note = (notes_dir(tmp_path) / "morning.wav.md").read_text(encoding="utf-8")
+    # 失敗的分段照樣佔一個帶時間碼的小節——空白會被 Extract 當成「那時候沒人講話」
+    assert "## 00:01:00–00:02:00" in note
+    assert "轉錄失敗" in note
+    assert "chunk decode failed" in note
+
+
+def test_a_failed_task_is_resumed_instead_of_re_uploaded(tmp_path, asr):
+    task = submit_one(tmp_path, asr)
+    asr.fail(task, "worker crashed")
+
+    payload = submit(tmp_path, asr)
+
+    assert payload["submitted"] == []
+    assert payload["resumed"] == [
+        {
+            "recording": "morning.wav",
+            "media": "morning.wav.mp3",
+            "task": task,
+            "status": "preprocessing",
+        }
+    ]
+    # 續傳，不重新上傳 mp3：已經轉好的部分不白費
+    assert asr.resumed == [task]
+    assert len(asr.uploads) == 1
+    # 續傳後的狀態回寫進本地的記錄
+    assert task_record(tmp_path, "morning.wav.mp3")["status"] == "preprocessing"
+
+
+def test_a_failed_task_is_reported_by_fetch_and_leaves_no_note(tmp_path, asr):
+    task = submit_one(tmp_path, asr)
+    asr.fail(task, "worker crashed")
+
+    payload = fetch(tmp_path, asr)
+
+    assert payload["fetched"] == []
+    assert payload["failed"] == [
+        {"recording": "morning.wav", "task": task, "error": "worker crashed"}
+    ]
+    assert not notes_dir(tmp_path).exists()
+
+
+def test_one_unreadable_task_does_not_stop_the_batch_on_submit(tmp_path, asr):
+    raw = rawdata_dir(tmp_path)
+    fixtures.write_silent_recording(raw / "afternoon.wav")
+    fixtures.write_silent_recording(raw / "morning.wav")
+    # 服務端不認得的任務：一份錄音壞掉不該擋住同一場會議的其他錄音
+    ghost = media_dir(tmp_path) / "afternoon.wav.mp3.task.json"
+    ghost.parent.mkdir(parents=True, exist_ok=True)
+    ghost.write_text(
+        json.dumps({"recording": "afternoon.wav", "task": "ghost"}), encoding="utf-8"
+    )
+
+    payload = submit(tmp_path, asr)
+
+    assert [entry["recording"] for entry in payload["failed"]] == ["afternoon.wav"]
+    assert [entry["recording"] for entry in payload["submitted"]] == ["morning.wav"]
+
+
+def test_one_unreadable_task_does_not_stop_the_batch_on_fetch(tmp_path, asr):
+    task = submit_one(tmp_path, asr)
+    asr.finish(task, [(0.0, 20.0, "早上的討論")])
+    ghost = media_dir(tmp_path) / "afternoon.wav.mp3.task.json"
+    ghost.write_text(
+        json.dumps({"recording": "afternoon.wav", "task": "ghost"}), encoding="utf-8"
+    )
+
+    payload = fetch(tmp_path, asr)
+
+    assert [entry["recording"] for entry in payload["fetched"]] == ["morning.wav"]
+    assert len(payload["failed"]) == 1
+    assert (notes_dir(tmp_path) / "morning.wav.md").is_file()
+
+
 # --- 不變式 ------------------------------------------------------------------
 
 
