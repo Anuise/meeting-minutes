@@ -5,6 +5,7 @@
 
 import json
 import struct
+import subprocess
 import zipfile
 import zlib
 
@@ -120,6 +121,21 @@ def write_epub(path, text):
         archive.writestr("META-INF/container.xml", container)
         archive.writestr("OEBPS/content.opf", opf)
         archive.writestr("OEBPS/chapter1.xhtml", chapter)
+
+
+def write_silent_recording(path, seconds=0.5, video=False):
+    """用容器裡的 ffmpeg 產一段極短的靜音 Recording，格式由副檔名決定。
+
+    比假造一個「看起來像音檔」的位元組串誠實：轉檔那一步真的會跑起來。
+    """
+    inputs = ["-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono"]
+    if video:
+        inputs += ["-f", "lavfi", "-i", "color=c=black:s=32x32:r=5"]
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-y", *inputs, "-t", str(seconds), str(path)],
+        check=True,
+        capture_output=True,
+    )
 
 
 def write_png(path):

@@ -41,7 +41,16 @@ def test_help_lists_the_planned_subcommands():
     result = run_mm("--help")
 
     assert result.returncode == 0, result.stderr
-    for command in ("init", "ingest", "render", "check", "scan-docx", "apply-docx", "list"):
+    for command in (
+        "init",
+        "ingest",
+        "transcribe-submit",
+        "render",
+        "check",
+        "scan-docx",
+        "apply-docx",
+        "list",
+    ):
         assert command in result.stdout, f"{command} 沒有出現在 --help 中"
 
 
@@ -50,6 +59,7 @@ def test_init_creates_folder_skeleton(tmp_path):
 
     expected = [
         "rawdata",
+        "media",
         "notes",
         "records",
         "output",

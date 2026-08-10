@@ -9,6 +9,7 @@ import argparse
 import json
 import mimetypes
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -16,6 +17,7 @@ VERSION = "0.1.0"
 
 DIRECTORIES = (
     "rawdata",
+    "media",
     "notes",
     "records",
     "output",
@@ -332,6 +334,86 @@ def cmd_ingest(args):
         "ingested": ingested,
         "skipped": skipped,
         "unsupported": unsupported,
+        "failed": failed,
+    }
+
+
+# 丟視訊、單聲道、16 kHz（Whisper 系模型內部就是這個取樣率，更高只是浪費）、
+# 32 kbps（語音夠用，一小時約 14 MB）。參數固定，不開放設定。
+FFMPEG_ARGS = ("-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k", "-f", "mp3")
+
+
+def transcode(recording, media):
+    """把一份 Recording 轉成送得上去的 Media。
+
+    以 argv list 傳參、不經 shell——Meeting slug 含空格與中文。
+    """
+    media.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        ["ffmpeg", "-nostdin", "-y", "-i", str(recording), *FFMPEG_ARGS, str(media)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        # ffmpeg 失敗時仍會留下一個半成品，留著會被下一次的 mtime 判定當成轉好了
+        media.unlink(missing_ok=True)
+        tail = [line for line in result.stderr.splitlines() if line.strip()][-3:]
+        raise RuntimeError("ffmpeg 轉檔失敗：" + " / ".join(tail))
+
+
+def recordings(raw_root):
+    """rawdata/<meeting>/ 底下的所有 Recording，含子資料夾。"""
+    return sorted(
+        path
+        for path in raw_root.rglob("*")
+        if path.is_file() and material_kind(path) == RECORDING
+    )
+
+
+def cmd_transcribe_submit(args):
+    """把 rawdata/<meeting>/ 底下的 Recording 轉成 media/<meeting>/ 的 Media。
+
+    只寫 media/，絕不寫 rawdata/。單一 Recording 失敗不中斷整批，失敗項目集中回報。
+    """
+    root = Path(args.root)
+    raw_root = root / "rawdata" / args.meeting
+    if not raw_root.is_dir():
+        raise CommandError(f"找不到 Raw Material 目錄：rawdata/{args.meeting}")
+    media_root = root / "media" / args.meeting
+
+    transcoded = []
+    skipped = []
+    failed = []
+
+    for recording in recordings(raw_root):
+        relative = recording.relative_to(raw_root).as_posix()
+        # Media 檔名保留 Recording 的原副檔名，理由與 Note 的命名規則相同
+        media_relative = f"{relative}.mp3"
+        media = media_root / media_relative
+        entry = {"recording": relative, "media": media_relative}
+
+        # 沿用 Ingest 的 mtime 慣例：時間戳打平時寧可多轉一次
+        if media.exists() and media.stat().st_mtime > recording.stat().st_mtime:
+            skipped.append(entry)
+            continue
+
+        try:
+            transcode(recording, media)
+        except Exception as error:
+            failed.append(
+                {"recording": relative, "error": f"{type(error).__name__}: {error}"}
+            )
+            continue
+        transcoded.append(entry)
+
+    return {
+        "meeting": args.meeting,
+        "rawdata": str(raw_root),
+        "media": str(media_root),
+        "transcoded": transcoded,
+        "skipped": skipped,
         "failed": failed,
     }
 
@@ -1037,6 +1119,13 @@ def build_parser():
     ingest.add_argument("meeting", help="Meeting slug，即 rawdata/ 底下的資料夾名稱")
     ingest.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
     ingest.set_defaults(func=cmd_ingest)
+
+    submit = subparsers.add_parser(
+        "transcribe-submit", help="把 Recording 轉成 Media 並送去轉錄"
+    )
+    submit.add_argument("meeting", help="Meeting slug，即 rawdata/ 底下的資料夾名稱")
+    submit.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
+    submit.set_defaults(func=cmd_transcribe_submit)
 
     render = subparsers.add_parser("render", help="把 Minutes Record 套模板變成 Deliverable")
     render.add_argument("meeting", help="Meeting slug，即 records/ 底下的檔名（不含 .yaml）")

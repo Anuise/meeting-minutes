@@ -6,6 +6,8 @@ x-mm: &mm
     - ./scripts:/work/scripts:ro
     - ./tests:/work/tests:ro
     - ./glossary.yaml:/work/glossary.yaml:ro
+    # Media 是純衍生物，讀寫；rawdata/ 仍維持唯讀（ADR-0006）
+    - ./media:/work/media
     - ./notes:/work/notes
     - ./records:/work/records
     - ./output:/work/output

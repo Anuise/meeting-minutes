@@ -22,7 +22,7 @@ docker info
 `docker-compose.yml` 把這些目錄掛進容器，掛載前它們必須存在於宿主端：
 
 ```bash
-mkdir -p rawdata notes records output templates
+mkdir -p rawdata media notes records output templates
 ```
 
 `glossary.yaml` 以唯讀**檔案**掛載。它在版控裡，clone 就有；但若不存在，Docker 會在那個路徑建一個**目錄**，掛載就壞了。所以先確認它是檔案：

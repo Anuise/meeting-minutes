@@ -1,5 +1,6 @@
 # 會議內容一律不進版控（客戶資料）
 /rawdata/
+/media/
 /notes/
 /records/
 /output/
