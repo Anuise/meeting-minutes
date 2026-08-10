@@ -255,21 +255,28 @@ IMAGE_MESSAGE = (
     "照片上的內容需要進會議記錄的話，請自行補一份文字說明放進 rawdata/。"
 )
 
+# 素材的三種分類。Ingest 與 Transcribe 共用同一個判定，開第二套遲早漂移。
+RECORDING = "recording"
+IMAGE = "image"
+DOCUMENT = "document"
 
-def unsupported_message(raw):
-    """回傳「這個檔案為什麼不轉」；該轉的回 None。"""
+UNSUPPORTED_MESSAGES = {RECORDING: AUDIO_MESSAGE, IMAGE: IMAGE_MESSAGE}
+
+
+def material_kind(raw):
+    """這個檔案是哪一類素材：Recording、圖片，還是 Ingest 轉得動的文件。"""
     suffix = raw.suffix.lower()
     if suffix in AUDIO_SUFFIXES:
-        return AUDIO_MESSAGE
+        return RECORDING
     if suffix in IMAGE_SUFFIXES:
-        return IMAGE_MESSAGE
+        return IMAGE
 
     mimetype = mimetypes.guess_type(raw.name)[0] or ""
     if mimetype.startswith(("audio/", "video/")):
-        return AUDIO_MESSAGE
+        return RECORDING
     if mimetype.startswith("image/"):
-        return IMAGE_MESSAGE
-    return None
+        return IMAGE
+    return DOCUMENT
 
 
 def cmd_ingest(args):
@@ -294,9 +301,9 @@ def cmd_ingest(args):
     for raw in sorted(path for path in raw_root.rglob("*") if path.is_file()):
         relative = raw.relative_to(raw_root).as_posix()
 
-        message = unsupported_message(raw)
-        if message:
-            unsupported.append({"raw": relative, "message": message})
+        kind = material_kind(raw)
+        if kind != DOCUMENT:
+            unsupported.append({"raw": relative, "message": UNSUPPORTED_MESSAGES[kind]})
             continue
 
         # 副檔名留在 Note 檔名裡：看得出來源，且 slides.pdf 與 slides.docx 不會互相蓋掉
