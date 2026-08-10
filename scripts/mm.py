@@ -561,6 +561,131 @@ def cmd_transcribe_submit(args):
     }
 
 
+def timecode(seconds):
+    total = int(seconds)
+    return f"{total // 3600:02d}:{total % 3600 // 60:02d}:{total % 60:02d}"
+
+
+# 空白比警語危險：Extract 會把沒字的那一段當成「那時候沒人講話」，
+# 於是一段真的有內容的討論被安靜地漏掉。
+CHUNK_FAILED = "**這一段轉錄失敗，沒有逐字內容**（服務端訊息：{message}）"
+
+
+def transcript(meeting, record, detail):
+    """把 Transcription Task 的分段組成一份逐字稿 Note。
+
+    切成帶時間碼的小節不是排版偏好，是可查證性：每筆決議與待辦都要帶 source
+    （Note 路徑加行號），一整塊純文字會讓所有 source 指向同一團。
+    """
+    duration = detail.get("duration_sec")
+    lines = [
+        f"# {record['recording']}（語音轉文字）",
+        "",
+        f"- 來源：rawdata/{meeting}/{record['recording']}",
+        f"- 任務：ASR Service task {detail['id']}（語言 {detail['language']}，"
+        f"時長 {round(duration) if duration else '未知'} 秒，"
+        f"{len(detail['chunks'])} 段）",
+        "",
+    ]
+    for chunk in detail["chunks"]:
+        lines += [
+            f"## {timecode(chunk['start_sec'])}–{timecode(chunk['end_sec'])}",
+            "",
+            chunk.get("text")
+            or CHUNK_FAILED.format(message=chunk.get("error_message") or "未提供"),
+            "",
+        ]
+    return "\n".join(lines)
+
+
+def cmd_transcribe_fetch(args):
+    """查每個 Transcription Task 的狀態；完成的落成 Note，未完成的回報進度。
+
+    只寫 notes/，不碰 rawdata/ 與 media/ 的 mp3。單一 Recording 失敗不中斷整批。
+    """
+    root = Path(args.root)
+    media_root = root / "media" / args.meeting
+    if not media_root.is_dir():
+        raise CommandError(
+            f"找不到 Media 目錄：media/{args.meeting}。先跑一次 Submit 再來 Fetch。"
+        )
+    note_root = root / "notes" / args.meeting
+
+    base = asr_base_url()
+    session = asr_session()
+
+    fetched = []
+    pending = []
+    skipped = []
+    failed = []
+    degraded = []
+
+    for record_file in sorted(media_root.rglob("*.task.json")):
+        try:
+            record = json.loads(record_file.read_text(encoding="utf-8"))
+            detail = asr_request(session, "GET", f"{base}/api/tasks/{record['task']}")
+            entry = {"recording": record["recording"], "task": record["task"]}
+
+            if detail["status"] == TASK_FAILED:
+                failed.append(entry | {"error": detail.get("error_message") or "未提供"})
+                continue
+
+            if detail["status"] != TASK_DONE:
+                pending.append(
+                    entry
+                    | {
+                        "status": detail["status"],
+                        "progress_pct": detail["progress_pct"],
+                        "completed_chunks": detail["completed_chunks"],
+                        "total_chunks": detail["total_chunks"],
+                    }
+                )
+                continue
+
+            note_relative = f"{record['recording']}.md"
+            note = note_root / note_relative
+            # 與 Ingest「Note 比 Raw Material 新就跳過」同一條規則：
+            # 使用者可能手動校對過逐字稿。
+            if note.exists() and note.stat().st_mtime > record_file.stat().st_mtime:
+                skipped.append(entry | {"note": note_relative})
+                continue
+
+            note.parent.mkdir(parents=True, exist_ok=True)
+            note.write_text(transcript(args.meeting, record, detail), encoding="utf-8")
+            broken = [
+                chunk for chunk in detail["chunks"] if not chunk.get("text")
+            ]
+            fetched.append(
+                entry
+                | {
+                    "note": note_relative,
+                    "chunks": len(detail["chunks"]),
+                    "failed_chunks": len(broken),
+                }
+            )
+            if broken:
+                degraded.append(note_relative)
+        except Exception as error:
+            failed.append(
+                {
+                    "recording": record_file.name,
+                    "error": f"{type(error).__name__}: {error}",
+                }
+            )
+
+    return {
+        "meeting": args.meeting,
+        "media": str(media_root),
+        "notes": str(note_root),
+        "fetched": fetched,
+        "pending": pending,
+        "skipped": skipped,
+        "failed": failed,
+        # 有分段沒轉出來的 Note 要講出來，不能安靜吞掉
+        "degraded": degraded,
+    }
+
+
 def has_files(directory):
     """這一階段真的做過嗎。空資料夾不算——使用者建了資料夾但還沒放東西。"""
     return directory.is_dir() and any(path.is_file() for path in directory.rglob("*"))
@@ -1269,6 +1394,13 @@ def build_parser():
     submit.add_argument("meeting", help="Meeting slug，即 rawdata/ 底下的資料夾名稱")
     submit.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
     submit.set_defaults(func=cmd_transcribe_submit)
+
+    fetch = subparsers.add_parser(
+        "transcribe-fetch", help="查轉錄進度；完成的把逐字稿落成 Note"
+    )
+    fetch.add_argument("meeting", help="Meeting slug，即 media/ 底下的資料夾名稱")
+    fetch.add_argument("--root", default="/work", help="骨架的根目錄（預設 /work）")
+    fetch.set_defaults(func=cmd_transcribe_fetch)
 
     render = subparsers.add_parser("render", help="把 Minutes Record 套模板變成 Deliverable")
     render.add_argument("meeting", help="Meeting slug，即 records/ 底下的檔名（不含 .yaml）")

@@ -49,6 +49,12 @@ def submit(root, asr, meeting=MEETING):
     return json.loads(result.stdout)
 
 
+def fetch(root, asr, meeting=MEETING):
+    result = run_mm("transcribe-fetch", meeting, "--root", str(root), url=asr.url)
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
 def rawdata_dir(root, meeting=MEETING):
     target = root / "rawdata" / meeting
     target.mkdir(parents=True, exist_ok=True)
@@ -282,6 +288,116 @@ def test_missing_service_url_exits_nonzero(tmp_path, asr):
     assert result.returncode != 0
     assert "MM_ASR_URL" in result.stderr
     assert asr.uploads == []
+
+
+# --- 取回 --------------------------------------------------------------------
+
+
+def notes_dir(root, meeting=MEETING):
+    return root / "notes" / meeting
+
+
+def submit_one(tmp_path, asr, name="morning.wav"):
+    """送出一份 Recording，回傳它的 Transcription Task id。"""
+    fixtures.write_silent_recording(rawdata_dir(tmp_path) / name)
+    return submit(tmp_path, asr)["submitted"][0]["task"]
+
+
+def test_a_finished_task_becomes_a_note(tmp_path, asr):
+    task = submit_one(tmp_path, asr)
+    asr.finish(
+        task,
+        [(0.0, 90.0, "第一段的討論內容"), (90.0, 185.5, "第二段的討論內容")],
+        duration_sec=185.5,
+    )
+
+    payload = fetch(tmp_path, asr)
+
+    assert payload["pending"] == []
+    entry = payload["fetched"][0]
+    assert entry == {
+        "recording": "morning.wav",
+        "task": task,
+        "note": "morning.wav.md",
+        "chunks": 2,
+        "failed_chunks": 0,
+    }
+
+    note = (notes_dir(tmp_path) / "morning.wav.md").read_text(encoding="utf-8")
+    # 開頭標明來源與任務，使用者看到 source 引用時查得回原始錄音
+    assert "# morning.wav（語音轉文字）" in note
+    assert f"- 來源：rawdata/{MEETING}/morning.wav" in note
+    assert f"ASR Service task {task}" in note
+    assert "語言 Chinese" in note
+    assert "時長 186 秒" in note
+    assert "2 段" in note
+    # 每個分段一個帶起訖時間碼的小節
+    assert "## 00:00:00–00:01:30" in note
+    assert "## 00:01:30–00:03:05" in note
+    assert "第一段的討論內容" in note
+    assert "第二段的討論內容" in note
+
+
+def test_an_unfinished_task_reports_progress_and_writes_no_note(tmp_path, asr):
+    task = submit_one(tmp_path, asr)
+    asr.progress(task, completed=3, total=8, pct=37.5)
+
+    payload = fetch(tmp_path, asr)
+
+    assert payload["fetched"] == []
+    assert payload["pending"] == [
+        {
+            "recording": "morning.wav",
+            "task": task,
+            "status": "processing",
+            "progress_pct": 37.5,
+            "completed_chunks": 3,
+            "total_chunks": 8,
+        }
+    ]
+    assert not notes_dir(tmp_path).exists()
+
+
+def test_a_note_edited_by_hand_is_not_overwritten(tmp_path, asr):
+    task = submit_one(tmp_path, asr)
+    asr.finish(task, [(0.0, 30.0, "機器轉出來的內容")])
+    fetch(tmp_path, asr)
+
+    note = notes_dir(tmp_path) / "morning.wav.md"
+    note.write_text("我自己校對過的逐字稿\n", encoding="utf-8")
+    record_file = media_dir(tmp_path) / "morning.wav.mp3.task.json"
+    os.utime(note, (note.stat().st_atime, record_file.stat().st_mtime + 10))
+
+    payload = fetch(tmp_path, asr)
+
+    assert payload["fetched"] == []
+    assert [entry["note"] for entry in payload["skipped"]] == ["morning.wav.md"]
+    assert note.read_text(encoding="utf-8") == "我自己校對過的逐字稿\n"
+
+
+def test_a_recording_in_a_subdirectory_keeps_its_path_in_the_note(tmp_path, asr):
+    raw = rawdata_dir(tmp_path)
+    (raw / "第一段").mkdir()
+    fixtures.write_silent_recording(raw / "第一段" / "part1.wav")
+    task = submit(tmp_path, asr)["submitted"][0]["task"]
+    asr.finish(task, [(0.0, 12.0, "子資料夾裡的錄音")])
+
+    payload = fetch(tmp_path, asr)
+
+    assert payload["fetched"][0]["note"] == "第一段/part1.wav.md"
+    note = notes_dir(tmp_path) / "第一段" / "part1.wav.md"
+    assert f"- 來源：rawdata/{MEETING}/第一段/part1.wav" in note.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_fetch_before_submit_exits_nonzero(tmp_path, asr):
+    rawdata_dir(tmp_path)
+
+    result = run_mm("transcribe-fetch", MEETING, "--root", str(tmp_path), url=asr.url)
+
+    assert result.returncode != 0
+    assert MEETING in result.stderr
 
 
 # --- 不變式 ------------------------------------------------------------------

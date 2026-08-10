@@ -45,6 +45,7 @@ def test_help_lists_the_planned_subcommands():
         "init",
         "ingest",
         "transcribe-submit",
+        "transcribe-fetch",
         "render",
         "check",
         "scan-docx",
