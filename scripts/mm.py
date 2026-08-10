@@ -252,7 +252,7 @@ IMAGE_SUFFIXES = frozenset(
     {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".heic"}
 )
 
-AUDIO_MESSAGE = (
+RECORDING_MESSAGE = (
     "Ingest 不轉音訊與影片，它只做機械轉檔。錄音交給 Transcribe 處理"
     "（跑 mm-transcribe），不必自己先轉成逐字稿。理由見 ADR-0006。"
 )
@@ -266,7 +266,7 @@ RECORDING = "recording"
 IMAGE = "image"
 DOCUMENT = "document"
 
-UNSUPPORTED_MESSAGES = {RECORDING: AUDIO_MESSAGE, IMAGE: IMAGE_MESSAGE}
+UNSUPPORTED_MESSAGES = {RECORDING: RECORDING_MESSAGE, IMAGE: IMAGE_MESSAGE}
 
 
 def material_kind(raw):
@@ -413,6 +413,7 @@ def asr_session():
 
 
 def asr_request(session, method, url, **options):
+    """對 ASR Service 發一次請求並回傳 JSON。非 2xx 一律當成失敗拋出去。"""
     response = session.request(method, url, timeout=(10, 600), **options)
     response.raise_for_status()
     return response.json()
@@ -456,6 +457,7 @@ def task_record(media):
 
 
 def write_task_record(media, relative, media_relative, summary):
+    """寫下這份 Recording 對到哪一個 Transcription Task，回傳寫進去的內容。"""
     record = {
         "recording": relative,
         "media": media_relative,
@@ -534,6 +536,8 @@ def cmd_transcribe_submit(args):
             if not fresh:
                 transcode(recording, media)
 
+            # 每次上傳前重問一次：一場會議可能有好幾份錄音，剩餘空間會一路減少
+            storage = asr_request(session, "GET", f"{base}/api/storage")
             ensure_room(storage, media)
             summary = create_task(session, base, media)
             record = write_task_record(media, relative, media_relative, summary)
@@ -559,12 +563,13 @@ def cmd_transcribe_submit(args):
         "resumed": resumed,
         "skipped": skipped,
         "failed": failed,
-        # 剩餘空間講出來，要不要去清由使用者自己判斷——不自動刪除服務端的任務
+        # 剩餘空間講出來（最後一次問到的），要不要去清由使用者自己判斷
         "storage": storage,
     }
 
 
 def timecode(seconds):
+    """把起訖秒數寫成 HH:MM:SS。切到秒就夠——這是拿去回錄音裡查證的粒度。"""
     total = int(seconds)
     return f"{total // 3600:02d}:{total % 3600 // 60:02d}:{total % 60:02d}"
 
@@ -572,6 +577,15 @@ def timecode(seconds):
 # 空白比警語危險：Extract 會把沒字的那一段當成「那時候沒人講話」，
 # 於是一段真的有內容的討論被安靜地漏掉。
 CHUNK_FAILED = "**這一段轉錄失敗，沒有逐字內容**（服務端訊息：{message}）"
+
+
+def chunk_failed(chunk):
+    """這一段是機器沒轉出來，還是真的沒人講話？
+
+    以服務端的 status 為準，不要用「有沒有字」去猜：一段真正的靜音會回
+    status done 配一段空字串，那不是失敗，寫上警語反而是另一種誤導。
+    """
+    return chunk.get("status") == TASK_FAILED or chunk.get("text") is None
 
 
 def transcript(meeting, record, detail):
@@ -591,11 +605,15 @@ def transcript(meeting, record, detail):
         "",
     ]
     for chunk in detail["chunks"]:
+        body = (
+            CHUNK_FAILED.format(message=chunk.get("error_message") or "未提供")
+            if chunk_failed(chunk)
+            else chunk["text"]
+        )
         lines += [
             f"## {timecode(chunk['start_sec'])}–{timecode(chunk['end_sec'])}",
             "",
-            chunk.get("text")
-            or CHUNK_FAILED.format(message=chunk.get("error_message") or "未提供"),
+            body,
             "",
         ]
     return "\n".join(lines)
@@ -655,9 +673,7 @@ def cmd_transcribe_fetch(args):
 
             note.parent.mkdir(parents=True, exist_ok=True)
             note.write_text(transcript(args.meeting, record, detail), encoding="utf-8")
-            broken = [
-                chunk for chunk in detail["chunks"] if not chunk.get("text")
-            ]
+            broken = [chunk for chunk in detail["chunks"] if chunk_failed(chunk)]
             fetched.append(
                 entry
                 | {

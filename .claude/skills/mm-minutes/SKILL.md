@@ -65,7 +65,8 @@ docker compose run --rm mm ingest <meeting>
 
 - `ingested` 有東西 → 明說**已自動執行 Ingest**，轉了哪幾個檔（Note 缺失或比 Raw Material 舊）。
 - `ingested` 是空的 → 不要說你跑了 Ingest，也不要說你沒跑；這一步沒有產生任何變化，不值得占用使用者的注意力。
-- `unsupported`、`failed` 有東西 → 照 `mm-ingest` 的規矩逐項講清楚，不要安靜吞掉。這些素材的內容**不會**進 Note，因此也不會進會議記錄。
+- `unsupported` 裡的**錄音與影片**：第 3 步已經處理過了，Ingest 照樣把它們列進 `unsupported` 是預期的（Ingest 只做機械轉檔）。**不要**告訴使用者這些錄音不會進會議記錄——逐字稿 Note 已經在了。
+- `unsupported` 裡的**圖片**與 `failed` → 照 `mm-ingest` 的規矩逐項講清楚，不要安靜吞掉。這些素材的內容**不會**進 Note，因此也不會進會議記錄。
 
 `raw_material: false` 但 `note: true`（使用者刪了 Raw Material，或直接拿到別人的 Note）→ **跳過這一步**，不要跑 ingest，它會因為找不到目錄而非零退出。兩者都是 false 就停手，請使用者先放素材。
 

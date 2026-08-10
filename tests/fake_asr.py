@@ -59,6 +59,10 @@ class FakeAsr:
                 "size": len(payload),
             }
         )
+        # 真服務的剩餘空間會隨著上傳一路減少，假服務照做，否則多份錄音的
+        # 空間檢查測不出來
+        self.storage["free_bytes"] -= len(payload)
+        self.storage["used_bytes"] += len(payload)
         self.tasks[task_id] = {
             "id": task_id,
             "original_filename": filename,

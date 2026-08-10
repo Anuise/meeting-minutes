@@ -171,11 +171,12 @@ def test_media_older_than_its_recording_is_transcoded_again(tmp_path, asr):
     media = media_dir(tmp_path) / "morning.wav.mp3"
     (media_dir(tmp_path) / "morning.wav.mp3.task.json").unlink()
     os.utime(media, (media.stat().st_atime, recording.stat().st_mtime - 10))
+    stale = media.stat().st_mtime_ns
 
     payload = submit(tmp_path, asr)
 
     assert [entry["transcoded"] for entry in payload["submitted"]] == [True]
-    assert media.stat().st_mtime > recording.stat().st_mtime
+    assert media.stat().st_mtime_ns > stale
 
 
 def test_one_broken_recording_does_not_stop_the_batch(tmp_path, asr):
@@ -269,13 +270,36 @@ def test_upload_is_blocked_when_the_media_exceeds_the_single_file_limit(tmp_path
     assert asr.uploads == []
 
 
+def test_space_is_checked_again_before_every_upload(tmp_path, asr):
+    # 先用另一場會議量出一份 Media 的實際大小，不要用猜的
+    fixtures.write_silent_recording(rawdata_dir(tmp_path, "size-probe") / "morning.wav")
+    submit(tmp_path, asr, "size-probe")
+    size = asr.uploads[0]["size"]
+
+    raw = rawdata_dir(tmp_path)
+    fixtures.write_silent_recording(raw / "afternoon.wav")
+    fixtures.write_silent_recording(raw / "morning.wav")
+    # 只夠再裝一份：第二份要在上傳前就被擋下，不能拿上傳前的舊數字放行
+    asr.storage["free_bytes"] = size + 1
+
+    payload = submit(tmp_path, asr)
+
+    assert [entry["recording"] for entry in payload["submitted"]] == ["afternoon.wav"]
+    assert [entry["recording"] for entry in payload["failed"]] == ["morning.wav"]
+    assert len(asr.uploads) == 2
+
+
 def test_remaining_space_is_reported(tmp_path, asr):
     raw = rawdata_dir(tmp_path)
     fixtures.write_silent_recording(raw / "morning.wav")
 
     payload = submit(tmp_path, asr)
 
-    assert payload["storage"]["free_bytes"] == asr.storage["free_bytes"]
+    # 回報的是最後一次上傳前問到的數字：那一份的大小還沒被扣掉
+    assert (
+        payload["storage"]["free_bytes"]
+        == asr.storage["free_bytes"] + asr.uploads[0]["size"]
+    )
     assert payload["storage"]["max_upload_mb"] == asr.storage["max_upload_mb"]
 
 
@@ -424,6 +448,19 @@ def test_a_failed_chunk_leaves_a_warning_instead_of_a_blank(tmp_path, asr):
     assert "## 00:01:00–00:02:00" in note
     assert "轉錄失敗" in note
     assert "chunk decode failed" in note
+
+
+def test_a_silent_chunk_is_not_reported_as_a_failure(tmp_path, asr):
+    task = submit_one(tmp_path, asr)
+    # 真的沒人講話的那一段：服務端說 done，只是沒有字。那不是失敗。
+    asr.finish(task, [(0.0, 30.0, ""), (30.0, 60.0, "後面有人開口了")])
+
+    payload = fetch(tmp_path, asr)
+
+    assert payload["fetched"][0]["failed_chunks"] == 0
+    assert payload["degraded"] == []
+    note = (notes_dir(tmp_path) / "morning.wav.md").read_text(encoding="utf-8")
+    assert "轉錄失敗" not in note
 
 
 def test_a_failed_task_is_resumed_instead_of_re_uploaded(tmp_path, asr):
