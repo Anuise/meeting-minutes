@@ -1,6 +1,9 @@
 x-mm: &mm
   build: .
   working_dir: /work
+  environment:
+    # ASR Service 的位址。值放在不進 git 的 .env（ADR-0006）。
+    MM_ASR_URL: ${MM_ASR_URL:-}
   volumes:
     - ./rawdata:/work/rawdata:ro
     - ./scripts:/work/scripts:ro

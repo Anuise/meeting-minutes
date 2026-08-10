@@ -5,5 +5,8 @@
 /records/
 /output/
 
+# 環境的設定（ASR Service 的內網位址）
+.env
+
 __pycache__/
 .pytest_cache/

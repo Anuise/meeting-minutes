@@ -8,6 +8,7 @@
 import argparse
 import json
 import mimetypes
+import os
 import re
 import subprocess
 import sys
@@ -372,10 +373,106 @@ def recordings(raw_root):
     )
 
 
-def cmd_transcribe_submit(args):
-    """把 rawdata/<meeting>/ 底下的 Recording 轉成 media/<meeting>/ 的 Media。
+ASR_URL_ENV = "MM_ASR_URL"
+# 語言寫死：專案的會議全是繁中。明確傳而不吃服務端預設，才不隨對方版本漂移。
+ASR_LANGUAGE = "Chinese"
+# 服務端的終態。冪等規則靠這兩個值區分「進行中」「已完成」與「失敗」。
+TASK_DONE = "done"
+TASK_FAILED = "failed"
 
-    只寫 media/，絕不寫 rawdata/。單一 Recording 失敗不中斷整批，失敗項目集中回報。
+
+def asr_base_url():
+    """ASR Service 的位址。位址是環境的屬性，不是命令的屬性，所以走環境變數。"""
+    url = os.environ.get(ASR_URL_ENV, "").strip()
+    if not url:
+        raise CommandError(
+            f"沒有設定 ASR Service 的位址。請在專案根目錄的 .env 寫上一行 "
+            f"{ASR_URL_ENV}=https://<asr-service 的位址>，再重跑一次。"
+        )
+    return url.rstrip("/")
+
+
+def asr_session():
+    """連 ASR Service 的 HTTP session。
+
+    **憑證驗證關閉**：服務的自簽憑證 Subject Alternative Name 只涵蓋 localhost
+    與 127.0.0.1，用 LAN IP 連一定驗不過，掛 CA 也無效。連線仍加密，但無法確認
+    對端身分。取捨與「憑證修好就把它拿掉」的條件見
+    docs/adr/0006-transcribe-recordings-via-asr-service.md。
+    """
+    import requests
+    import urllib3
+
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    session = requests.Session()
+    session.verify = False
+    return session
+
+
+def asr_request(session, method, url, **options):
+    response = session.request(method, url, timeout=(10, 600), **options)
+    response.raise_for_status()
+    return response.json()
+
+
+def create_task(session, base, media):
+    """把一份 Media 以 multipart 送上建立任務端點，回傳任務摘要。
+
+    送出去的檔名只取 Media 的檔名：路徑分隔字元在服務端怎麼處理沒有探明過，
+    而對應關係的真實來源本來就是本地的 Transcription Task 記錄。
+    """
+    with media.open("rb") as stream:
+        return asr_request(
+            session,
+            "POST",
+            f"{base}/api/tasks",
+            files={"file": (media.name, stream, "audio/mpeg")},
+            data={"language": ASR_LANGUAGE},
+        )
+
+
+def ensure_room(storage, media):
+    """對方裝得下嗎。裝不下就明確報錯，不要傳到一半才發現。"""
+    size = media.stat().st_size
+    limit = storage["max_upload_mb"] * 1024 * 1024
+    if size > limit:
+        raise RuntimeError(
+            f"Media 有 {size} bytes，超過 ASR Service 的單檔上限 "
+            f"{storage['max_upload_mb']} MB，沒有上傳。"
+        )
+    if size > storage["free_bytes"]:
+        raise RuntimeError(
+            f"Media 有 {size} bytes，ASR Service 只剩 {storage['free_bytes']} bytes，"
+            "沒有上傳。請先到服務端清掉用不到的任務。"
+        )
+
+
+def task_record(media):
+    """Transcription Task 的記錄檔，放在 Media 旁邊，與 mp3 同生命週期。"""
+    return media.with_name(f"{media.name}.task.json")
+
+
+def write_task_record(media, relative, media_relative, summary):
+    record = {
+        "recording": relative,
+        "media": media_relative,
+        "task": summary["id"],
+        "status": summary["status"],
+        "language": summary["language"],
+        "created_at": summary["created_at"],
+    }
+    task_record(media).write_text(
+        json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return record
+
+
+def cmd_transcribe_submit(args):
+    """把 Recording 轉成 Media，送上 ASR Service，並記下拿回來的 Transcription Task。
+
+    只寫 media/，絕不寫 rawdata/。四層跳過：Media 比 Recording 新就不重轉、
+    已有記錄且任務進行中或已完成就不重送、任務失敗就走服務端的續傳端點。
+    單一 Recording 在任一步失敗都不中斷整批，失敗項目集中回報。
     """
     root = Path(args.root)
     raw_root = root / "rawdata" / args.meeting
@@ -383,7 +480,12 @@ def cmd_transcribe_submit(args):
         raise CommandError(f"找不到 Raw Material 目錄：rawdata/{args.meeting}")
     media_root = root / "media" / args.meeting
 
-    transcoded = []
+    base = asr_base_url()
+    session = asr_session()
+    storage = asr_request(session, "GET", f"{base}/api/storage")
+
+    submitted = []
+    resumed = []
     skipped = []
     failed = []
 
@@ -392,29 +494,70 @@ def cmd_transcribe_submit(args):
         # Media 檔名保留 Recording 的原副檔名，理由與 Note 的命名規則相同
         media_relative = f"{relative}.mp3"
         media = media_root / media_relative
-        entry = {"recording": relative, "media": media_relative}
-
-        # 沿用 Ingest 的 mtime 慣例：時間戳打平時寧可多轉一次
-        if media.exists() and media.stat().st_mtime > recording.stat().st_mtime:
-            skipped.append(entry)
-            continue
 
         try:
-            transcode(recording, media)
+            record_file = task_record(media)
+            if record_file.is_file():
+                record = json.loads(record_file.read_text(encoding="utf-8"))
+                detail = asr_request(session, "GET", f"{base}/api/tasks/{record['task']}")
+                if detail["status"] != TASK_FAILED:
+                    skipped.append(
+                        {
+                            "recording": relative,
+                            "media": media_relative,
+                            "task": record["task"],
+                            "status": detail["status"],
+                        }
+                    )
+                    continue
+                # 失敗的任務走續傳，不重新上傳 mp3：已經轉好的部分不白費，
+                # 也不白燒對方一次運算資源。
+                summary = asr_request(
+                    session, "POST", f"{base}/api/tasks/{record['task']}/resume"
+                )
+                record = write_task_record(media, relative, media_relative, summary)
+                resumed.append(
+                    {
+                        "recording": relative,
+                        "media": media_relative,
+                        "task": record["task"],
+                        "status": record["status"],
+                    }
+                )
+                continue
+
+            # 沿用 Ingest 的 mtime 慣例：時間戳打平時寧可多轉一次
+            fresh = media.exists() and media.stat().st_mtime > recording.stat().st_mtime
+            if not fresh:
+                transcode(recording, media)
+
+            ensure_room(storage, media)
+            summary = create_task(session, base, media)
+            record = write_task_record(media, relative, media_relative, summary)
+            submitted.append(
+                {
+                    "recording": relative,
+                    "media": media_relative,
+                    "task": record["task"],
+                    "status": record["status"],
+                    "transcoded": not fresh,
+                }
+            )
         except Exception as error:
             failed.append(
                 {"recording": relative, "error": f"{type(error).__name__}: {error}"}
             )
-            continue
-        transcoded.append(entry)
 
     return {
         "meeting": args.meeting,
         "rawdata": str(raw_root),
         "media": str(media_root),
-        "transcoded": transcoded,
+        "submitted": submitted,
+        "resumed": resumed,
         "skipped": skipped,
         "failed": failed,
+        # 剩餘空間講出來，要不要去清由使用者自己判斷——不自動刪除服務端的任務
+        "storage": storage,
     }
 
 

@@ -387,6 +387,7 @@ dependencies = [
     { name = "pytest" },
     { name = "python-docx" },
     { name = "pyyaml" },
+    { name = "requests" },
 ]
 
 [package.metadata]
@@ -397,6 +398,7 @@ requires-dist = [
     { name = "pytest" },
     { name = "python-docx" },
     { name = "pyyaml" },
+    { name = "requests" },
 ]
 
 [[package]]

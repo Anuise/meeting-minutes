@@ -8,6 +8,8 @@ dependencies = [
     "python-docx",
     "jinja2",
     "pyyaml",
+    # Transcribe 與 ASR Service 之間的 HTTP client（ADR-0006）
+    "requests",
     "pytest",
 ]
 
