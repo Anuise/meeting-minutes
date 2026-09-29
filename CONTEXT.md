@@ -33,11 +33,11 @@ Raw Material 轉成的 markdown。是抽取階段唯一讀得到的素材形式�
 _Avoid_: Input, Converted file, 逐字稿
 
 **Minutes Record**:
-一場 Meeting 的會議記錄內容本身，與呈現方式無關的結構化資料。唯一的內容真實來源，允許人工編修，所有交付檔都由它渲染而來。放在 `records/<meeting>.yaml`。
+一場 Meeting 的會議記錄內容本身，與呈現方式無關的結構化資料。唯一的內容真實來源，允許人工編修，會議記錄的 Deliverable 都由它渲染而來。放在 `records/<meeting>.yaml`。
 _Avoid_: Minutes, Output, Result, 中間產物
 
 **Deliverable**:
-由 Minutes Record 渲染出來、實際交出去的檔案。可拋棄，隨時可從 Minutes Record 重建。放在 `output/<meeting>/`。
+實際交出去的檔案，分兩種：會議記錄由 Minutes Record 渲染而來；逐字稿是 Transcribe 產生的 Note 的原樣複本。兩者都可拋棄，隨時可重建。放在 `output/<meeting>/`。
 _Avoid_: Result, 成品
 
 **Glossary**:
@@ -79,5 +79,5 @@ _Avoid_: Import, Convert
 _Avoid_: Analyze, Summarize, 生成
 
 **Render**:
-把 Minutes Record 套模板變成 Deliverable。不呼叫模型，可重複執行。
+產出一場 Meeting 的所有 Deliverable：把 Minutes Record 套模板變成會議記錄，並把 Transcribe 產生的 Note 複製成逐字稿。不呼叫模型，可重複執行。
 _Avoid_: Generate, Build, 輸出

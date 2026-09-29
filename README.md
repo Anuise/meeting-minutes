@@ -79,8 +79,9 @@ rawdata/
 
 ```
 output/2026-07-28-project-weekly/
-├── minutes.md
-└── minutes.docx   ← 只有選了 Docx Template 才有
+├── 會議記錄_2026-07-28-project-weekly.md
+├── 會議記錄_2026-07-28-project-weekly.docx   ← 只有選了 Docx Template 才有
+└── 逐字稿_2026-07-28-project-weekly_1.md     ← 有錄音才有，一支錄音一份
 ```
 
 `/mm-minutes` 跑完會告訴你哪些格子沒填到（在交付檔上顯示為「未提及」）、哪些決議缺出處。**它不會替你猜內容** —— 素材裡沒講到的就留空。

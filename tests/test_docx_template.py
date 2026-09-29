@@ -212,7 +212,7 @@ def test_applied_template_renders_with_docxtpl(tmp_path):
     )
     assert result.returncode == 0, result.stderr
 
-    content = texts(tmp_path / "output" / MEETING / "minutes.docx")
+    content = texts(tmp_path / "output" / MEETING / f"會議記錄_{MEETING}.docx")
     assert "專案週會" in content["body"]
     assert "2026-07-28 14:00" in content["body"]
     assert "本次驗收由 李小華 主持。" in content["body"]
@@ -391,7 +391,7 @@ def test_marker_rows_become_a_repeating_table(tmp_path):
     )
     assert result.returncode == 0, result.stderr
 
-    body = texts(tmp_path / "output" / MEETING / "minutes.docx")["body"]
+    body = texts(tmp_path / "output" / MEETING / f"會議記錄_{MEETING}.docx")["body"]
     assert "補上登入頁的錯誤訊息" in body
     assert "確認驗收時程" in body
     assert "迴圈開始" not in body

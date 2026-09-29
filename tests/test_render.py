@@ -106,11 +106,30 @@ def write_docx_template(root, paragraphs, name="other.docx"):
 
 
 def deliverable(root, meeting=MEETING):
-    return root / "output" / meeting / "minutes.md"
+    return root / "output" / meeting / f"會議記錄_{meeting}.md"
 
 
 def docx_deliverable(root, meeting=MEETING):
-    return root / "output" / meeting / "minutes.docx"
+    return root / "output" / meeting / f"會議記錄_{meeting}.docx"
+
+
+def write_recording(root, relative, meeting=MEETING):
+    target = root / "rawdata" / meeting / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"\x00")
+    return target
+
+
+def write_transcript_note(root, recording, content, meeting=MEETING):
+    """Transcribe 落成的 Note：檔名是 Recording 的相對路徑加 .md。"""
+    target = root / "notes" / meeting / f"{recording}.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    return target
+
+
+def transcript_deliverable(root, number, meeting=MEETING):
+    return root / "output" / meeting / f"逐字稿_{meeting}_{number}.md"
 
 
 def markdown_content(text):
@@ -401,3 +420,65 @@ def test_missing_markdown_template_is_an_error(tmp_path):
     assert result.returncode == 1
     assert "nope.md.j2" in result.stderr
     assert not (tmp_path / "output" / MEETING).exists()
+
+
+def test_transcript_note_is_delivered_as_is(tmp_path):
+    # 逐字稿 Deliverable 是 Note 的原樣複本：使用者校對過的字一個都不能變
+    prepared(tmp_path)
+    write_recording(tmp_path, "2026-07-28 14-00-00.mp4")
+    note = write_transcript_note(
+        tmp_path, "2026-07-28 14-00-00.mp4", "# 逐字稿\n\n## 00:00:00–00:00:30\n\n大家好\n"
+    )
+
+    payload = render(tmp_path)
+
+    transcript = transcript_deliverable(tmp_path, 1)
+    assert transcript.read_bytes() == note.read_bytes()
+    assert payload["deliverables"] == [str(deliverable(tmp_path)), str(transcript)]
+
+
+def test_untranscribed_recording_keeps_its_number_and_is_reported(tmp_path):
+    # 編號跟著 Recording 走、不跟著 Note 走：第一支還沒轉好，第二支照樣是 _2，
+    # 客戶不會先後拿到兩份內容不同的 _1
+    prepared(tmp_path)
+    write_recording(tmp_path, "2026-07-28 14-00-00.mp4")
+    write_recording(tmp_path, "2026-07-28 15-00-00.mp4")
+    write_transcript_note(tmp_path, "2026-07-28 15-00-00.mp4", "第二段錄音\n")
+
+    payload = render(tmp_path)
+
+    assert not transcript_deliverable(tmp_path, 1).exists()
+    assert transcript_deliverable(tmp_path, 2).read_text(encoding="utf-8") == "第二段錄音\n"
+    assert payload["untranscribed"] == ["2026-07-28 14-00-00.mp4"]
+
+
+def test_only_notes_from_recordings_become_transcripts(tmp_path):
+    # 使用者自己放進 rawdata/ 的文字檔走 Ingest，分不出是不是逐字稿，不交付
+    prepared(tmp_path)
+    (tmp_path / "rawdata" / MEETING).mkdir(parents=True)
+    (tmp_path / "rawdata" / MEETING / "速記.txt").write_text("速記", encoding="utf-8")
+    write_transcript_note(tmp_path, "速記.txt", "速記\n")
+
+    payload = render(tmp_path)
+
+    assert list((tmp_path / "output" / MEETING).iterdir()) == [deliverable(tmp_path)]
+    assert payload["untranscribed"] == []
+
+
+def test_stale_transcripts_are_removed_on_rerender(tmp_path):
+    # rawdata/ 拿掉一支錄音之後重出，output/ 不能留著一份已經對不上的 _2
+    prepared(tmp_path)
+    for recording in ("2026-07-28 14-00-00.mp4", "2026-07-28 15-00-00.mp4"):
+        write_recording(tmp_path, recording)
+        write_transcript_note(tmp_path, recording, f"{recording}\n")
+    render(tmp_path)
+    (tmp_path / "rawdata" / MEETING / "2026-07-28 15-00-00.mp4").unlink()
+    handwritten = tmp_path / "output" / MEETING / "給客戶的說明.md"
+    handwritten.write_text("說明", encoding="utf-8")
+
+    render(tmp_path)
+
+    assert transcript_deliverable(tmp_path, 1).is_file()
+    assert not transcript_deliverable(tmp_path, 2).exists()
+    # 只清 Render 自己產出的逐字稿，使用者放進來的檔不動
+    assert handwritten.read_text(encoding="utf-8") == "說明"

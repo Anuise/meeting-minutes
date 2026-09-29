@@ -110,10 +110,12 @@ stdout 是 JSON：
   "markdown_template": "default.md.j2",
   "docx_template": "default.docx",
   "deliverables": [
-    "/work/output/2026-07-28-project-weekly/minutes.md",
-    "/work/output/2026-07-28-project-weekly/minutes.docx"
+    "/work/output/2026-07-28-project-weekly/會議記錄_2026-07-28-project-weekly.md",
+    "/work/output/2026-07-28-project-weekly/會議記錄_2026-07-28-project-weekly.docx",
+    "/work/output/2026-07-28-project-weekly/逐字稿_2026-07-28-project-weekly_1.md"
   ],
-  "unfilled": ["meta.location", "action_items[1].owner"]
+  "unfilled": ["meta.location", "action_items[1].owner"],
+  "untranscribed": []
 }
 ```
 
@@ -121,9 +123,11 @@ stdout 是 JSON：
 
 `unfilled` 是**模板讀到卻沒被填到的變數路徑**，順序就是它們在 Deliverable 上出現的順序。它涵蓋兩份模板——Markdown Template 的在前，Docx Template 才問到的接在後面。它包含兩種情況：Minutes Record 裡是空的，以及 Minutes Record 裡根本沒有這個欄位（模板與 Schema 不強制綁定）。每一項在 Deliverable 上都是一個「未提及」。
 
-兩份 Deliverable 的內容出自同一份 Minutes Record，可以互相對帳。換一份 Docx Template 重跑只是重新 Render，不重抽、也不會動到 Minutes Record。
+`deliverables` 裡的 `逐字稿_<meeting>_N.md` 是 Transcribe 產生的 Note 原樣複本，一支 Recording 一份，N 依 Recording 在 `rawdata/<meeting>/` 底下的相對路徑排序、從 1 開始。沒有 Recording 的 Meeting 就沒有逐字稿。`untranscribed` 列出還沒有 Note 的 Recording，它那一號會空著，不由後面的遞補。
 
-Render 不呼叫模型，只讀 `records/` 與 `templates/`、只寫 `output/`。整個刪掉 `output/<meeting>/` 再重跑，內容完全一樣。
+兩份會議記錄 Deliverable 的內容出自同一份 Minutes Record，可以互相對帳。換一份 Docx Template 重跑只是重新 Render，不重抽、也不會動到 Minutes Record。
+
+Render 不呼叫模型，只讀 `records/`、`templates/`、`rawdata/` 與 `notes/`，只寫 `output/`。整個刪掉 `output/<meeting>/` 再重跑，內容完全一樣。
 
 ## 7. 交付前的檢查
 
@@ -145,7 +149,7 @@ docker compose run --rm mm check <meeting> --schema <schema> --markdown-template
 
 1. 有沒有自動補跑 Transcribe 與 Ingest（有就明說，並列出轉了哪幾份錄音、哪幾個檔）。
 2. Extract 是新抽的，還是沿用既有的 Minutes Record。
-3. Deliverable 在哪裡：`output/<meeting>/minutes.md`，有選 Docx Template 的話再加 `output/<meeting>/minutes.docx`。
+3. Deliverable 在哪裡：`output/<meeting>/會議記錄_<meeting>.md`，有選 Docx Template 的話再加 `output/<meeting>/會議記錄_<meeting>.docx`；有逐字稿就列出每一份 `逐字稿_<meeting>_N.md`。`untranscribed` 不是空的，就說哪幾支錄音還沒轉好、所以少了哪幾號逐字稿。
 4. `unfilled` 逐項列出來，用使用者看得懂的說法（`meta.location` → 「地點」，`action_items[1].owner` → 「第 2 筆待辦的負責人」），並說明這些格子在 Deliverable 上顯示為「未提及」。**不要**建議由你把它們補滿。
 5. 檢查的三份清單。`missing_source` 與 `unmapped_variables` 是 `unfilled` 沒講到的兩件事，一定要講；`blank_fields` 與 `unfilled` 多半重疊，只補上 `unfilled` 沒有的那幾項就好，不要把同一個空格講兩遍。三份都空就講一句「檢查沒有發現」。
 

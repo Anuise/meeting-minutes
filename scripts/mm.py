@@ -871,10 +871,44 @@ def render_docx(template, target, data, unfilled):
     document.save(str(target))
 
 
-def cmd_render(args):
-    """把 Minutes Record 套上 Markdown Template 與（選填的）Docx Template，寫出 Deliverable。
+def deliver_transcripts(root, meeting):
+    """把 Transcribe 落成的 Note 原樣複製成逐字稿 Deliverable。
 
-    不呼叫模型，只讀 records/ 與 templates/、只寫 output/，跑幾次結果都一樣。
+    回傳 (寫出的檔案, 還沒有 Note 的 Recording)。編號依 Recording 在
+    rawdata/<meeting>/ 底下的相對路徑排序：錄音檔名多半是時間戳，排序即錄音先後。
+    還沒轉好的那一號空著而不遞補，同一支錄音的編號才不會隨轉檔進度變動。
+    """
+    output = root / "output" / meeting
+    # 先清掉上一次的逐字稿：Recording 被拿掉後，舊編號的檔案已經對不上。
+    # 用前綴比對而不用 glob，Meeting slug 裡的 [ ] 才不會被當成萬用字元。
+    prefix = f"逐字稿_{meeting}_"
+    for stale in output.iterdir():
+        if stale.name.startswith(prefix) and stale.suffix == ".md":
+            stale.unlink()
+
+    raw_root = root / "rawdata" / meeting
+    if not raw_root.is_dir():
+        return [], []
+    note_root = root / "notes" / meeting
+    delivered = []
+    untranscribed = []
+    for number, recording in enumerate(recordings(raw_root), start=1):
+        relative = recording.relative_to(raw_root).as_posix()
+        note = note_root / f"{relative}.md"
+        if not note.is_file():
+            untranscribed.append(relative)
+            continue
+        target = output / f"{prefix}{number}.md"
+        target.write_bytes(note.read_bytes())
+        delivered.append(target)
+    return delivered, untranscribed
+
+
+def cmd_render(args):
+    """把 Minutes Record 套上 Markdown Template 與（選填的）Docx Template 寫出會議記錄，
+    並把 Transcribe 落成的 Note 複製成逐字稿。
+
+    不呼叫模型，只讀 records/、templates/、rawdata/ 與 notes/，只寫 output/，跑幾次結果都一樣。
     """
     root = Path(args.root)
     record, data = load_record(root, args.meeting, "Render")
@@ -896,15 +930,18 @@ def cmd_render(args):
     unfilled = []
     markdown = render_markdown(template.read_text(encoding="utf-8"), data, unfilled)
 
-    deliverable = root / "output" / args.meeting / "minutes.md"
+    deliverable = root / "output" / args.meeting / f"會議記錄_{args.meeting}.md"
     deliverable.parent.mkdir(parents=True, exist_ok=True)
     deliverable.write_text(markdown, encoding="utf-8")
     deliverables = [deliverable]
 
     if docx_template:
-        docx_deliverable = deliverable.parent / "minutes.docx"
+        docx_deliverable = deliverable.with_suffix(".docx")
         render_docx(docx_template, docx_deliverable, data, unfilled)
         deliverables.append(docx_deliverable)
+
+    transcripts, untranscribed = deliver_transcripts(root, args.meeting)
+    deliverables += transcripts
 
     return {
         "meeting": args.meeting,
@@ -913,6 +950,7 @@ def cmd_render(args):
         "docx_template": args.docx_template,
         "deliverables": [str(path) for path in deliverables],
         "unfilled": unfilled,
+        "untranscribed": untranscribed,
     }
 
 

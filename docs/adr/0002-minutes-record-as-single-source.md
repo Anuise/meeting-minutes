@@ -15,3 +15,4 @@
 - Minutes Record 因此是**可拋棄性最低**的東西，放在自己的 `records/` 而不是會被覆寫清空的 `output/`。
 - Minutes Record 每筆決議與待辦都帶 `source` 指回 Note；抽不到的欄位一律留空並在 Deliverable 上標「未提及」，不推測。會議記錄被引用時要能查證到源頭。
 - 多一份 schema 要維護，且自由文字段落的語感可能被 schema 綁住。
+- 這條原則管的是**會議記錄的內容**。逐字稿 Deliverable 是 Transcribe 產生的 Note 的原樣複本，不經過 Minutes Record——它本身就是素材，不是從素材抽出來的內容，沒有兩份版本對不上帳的問題。

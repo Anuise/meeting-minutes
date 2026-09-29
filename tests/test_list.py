@@ -50,7 +50,7 @@ def make_record(root, slug):
 
 
 def make_deliverable(root, slug):
-    write(root / "output" / slug / "minutes.md")
+    write(root / "output" / slug / f"會議記錄_{slug}.md")
 
 
 # 每種完成度一個 Meeting，一次列出來才看得出彼此的狀態沒有互相污染
