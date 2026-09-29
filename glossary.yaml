@@ -13,6 +13,22 @@ abbreviations: {}
 # 例：
 #   POC: 概念驗證
 
-corrections: {}
+corrections:
+  石潤: 十論
+  時潤: 十論
+  時論: 十論
+  實論: 十論
+  阿奇: aki
+  文爾: 文和
+  冰神: vincent
+  巨哥: G哥
+  高健: 告誡
+  基米南位: 機敏欄位
+  壞死: weiss
+  壞少: weiss
+  外事: weiss
+  外子: weiss
+  外史: weiss
+  DOP: DLP
 # 例：
 #   決議事項: 決議

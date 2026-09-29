@@ -25,14 +25,16 @@ docker info
 docker compose run --rm mm list
 ```
 
-清單來源與 `mm-list` 完全相同，不要自己去 `ls` 資料夾。要選的四樣，都**從清單挑，不要讓使用者手打**：
+清單來源與 `mm-list` 完全相同，不要自己去 `ls` 資料夾。要決定的四樣，都**從清單挑，不要讓使用者手打**：
 
 1. **Meeting** —— 從 `meetings` 裡 `minutes_record: true` 的挑。沒有 Minutes Record 就沒得檢查，請使用者先跑 `mm-minutes`。
-2. **Minutes Schema** —— 從 `schemas` 挑。只有一套就直接用，說一句「用 default.yaml」即可。
-3. **Markdown Template** —— 從 `markdown_templates` 挑。同上。
-4. **Docx Template** —— 從 `docx_templates` 挑，選項裡要包含「不使用」。挑他實際拿來交付的那一份；沒有要出 .docx 就省略。
+2. **Minutes Schema** —— 從 `schemas` 挑。
+3. **Markdown Template** —— 從 `markdown_templates` 挑。
+4. **Docx Template** —— 從 `docx_templates` 挑。
 
-被 `mm-minutes` 叫起來時**不要重問**——四樣它剛剛已經選過了，直接用同一組。
+**三份模板一律不問**，規則與 `mm-minutes` 相同：使用者沒指名就直接取名為 `default` 的那一份（`default.yaml`、`default.md.j2`、`default.docx`），有指名才照他說的換；他明講沒有要出 .docx 就省略。清單裡找不到 `default` 那一份時才需要問。
+
+被 `mm-minutes` 叫起來時**不要重問**——四樣它剛剛已經決定過了，直接用同一組。
 
 ## 3. 跑檢查
 

@@ -1,6 +1,6 @@
 ---
 name: mm-minutes
-description: 產出一場 Meeting 的會議記錄 —— 從清單選 Meeting、Minutes Schema、Markdown Template 與（選填的）Docx Template，需要時自動補跑 Transcribe 與 Ingest，讀 Note 抽出 Minutes Record，再渲染成 markdown 與（有選才有的）.docx Deliverable，最後回報有哪些變數沒被填到。這是主要入口；Minutes Record 已存在時只重新 Render，不重抽。
+description: 產出一場 Meeting 的會議記錄 —— 從清單選 Meeting，Minutes Schema、Markdown Template 與 Docx Template 沒指名就一律用 default，需要時自動補跑 Transcribe 與 Ingest，讀 Note 抽出 Minutes Record，再渲染成 markdown 與 .docx Deliverable，最後回報有哪些變數沒被填到。這是主要入口；Minutes Record 已存在時只重新 Render，不重抽。
 ---
 
 # mm-minutes
@@ -19,7 +19,7 @@ docker info
 
 > Docker daemon 沒有回應。請先啟動 Docker Desktop，等它的狀態變成 Running，再重新執行 mm-minutes。這個專案的所有程式都在容器內執行，宿主端不會安裝任何 Python 套件。
 
-## 2. 取得清單，讓使用者選四樣東西
+## 2. 取得清單，決定 Meeting 與三份模板
 
 ```bash
 docker compose run --rm mm list
@@ -27,12 +27,16 @@ docker compose run --rm mm list
 
 清單來源與 `mm-list` 完全相同，不要自己去 `ls` 資料夾——兩邊會漂移。
 
-要選的四樣，都**從清單挑，不要讓使用者手打**：
+要決定的四樣，都**從清單挑，不要讓使用者手打**：
 
 1. **Meeting** —— 從 `meetings` 挑。報給使用者時帶上每場的階段狀態（有沒有 Note、有沒有 Minutes Record），他才知道自己在選什麼。使用者已經指名了就不用問。
-2. **Minutes Schema** —— 從 `schemas` 挑。只有一套就直接用，說一句「用 default.yaml」即可，不必問。
-3. **Markdown Template** —— 從 `markdown_templates` 挑。同上。
-4. **Docx Template** —— 從 `docx_templates` 挑，**選項裡一定要明確包含「不使用」**。這一項與前三項不同：預設是不用，使用者沒表示就不產 .docx。只有一份可用時仍然要問，因為「要不要 .docx」是使用者的決定，不是清單長度的結果。
+2. **Minutes Schema** —— 從 `schemas` 挑。
+3. **Markdown Template** —— 從 `markdown_templates` 挑。
+4. **Docx Template** —— 從 `docx_templates` 挑。
+
+**三份模板一律不問。** 使用者這次沒指名哪一份，就直接取清單裡名為 `default` 的那一份（`default.yaml`、`default.md.j2`、`default.docx`），在回報時說一句用了哪三份即可。使用者有指名才照他說的換；他明講「不要 .docx」「不使用 Docx Template」時就不產 .docx。
+
+清單裡找不到 `default` 那一份時才需要問——這代表模板被改過名，不是常態。
 
 `meetings` 是空的就請使用者把素材放進 `rawdata/<meeting>/`（建議 `YYYY-MM-DD-短描述`），不要幫他建空資料夾。三份模板清單都空的代表還沒跑過 `mm-init`。
 
@@ -99,7 +103,7 @@ Minutes Record 的形狀（與 `mm-schema` 的規則一致）：`meta` 底下的
 docker compose run --rm mm render <meeting> --markdown-template <template> --docx-template <docx>
 ```
 
-使用者選了「不使用」就**整個省略 `--docx-template`**，不要傳空字串。
+使用者明講不要 .docx 時才**整個省略 `--docx-template`**，不要傳空字串。
 
 stdout 是 JSON：
 
@@ -137,7 +141,7 @@ Render 之後**一定要**跑一次，用第 2 步選定的同一組 schema 與�
 docker compose run --rm mm check <meeting> --schema <schema> --markdown-template <template> --docx-template <docx>
 ```
 
-沒選 Docx Template 就一樣省略 `--docx-template`。
+沒有要出 .docx 就一樣省略 `--docx-template`。
 
 它回三份清單：`blank_fields`（Minutes Record 有哪些欄位是空的）、`missing_source`（哪些決議或待辦缺 source）、`unmapped_variables`（模板裡有哪些變數在選定的 Minutes Schema 中找不到對應）。每一項都附一句寫好的 `message`，照著念即可。
 
@@ -149,7 +153,7 @@ docker compose run --rm mm check <meeting> --schema <schema> --markdown-template
 
 1. 有沒有自動補跑 Transcribe 與 Ingest（有就明說，並列出轉了哪幾份錄音、哪幾個檔）。
 2. Extract 是新抽的，還是沿用既有的 Minutes Record。
-3. Deliverable 在哪裡：`output/<meeting>/會議記錄_<meeting>.md`，有選 Docx Template 的話再加 `output/<meeting>/會議記錄_<meeting>.docx`；有逐字稿就列出每一份 `逐字稿_<meeting>_N.md`。`untranscribed` 不是空的，就說哪幾支錄音還沒轉好、所以少了哪幾號逐字稿。
+3. 用了哪三份模板（沒指名就是三份 default），以及 Deliverable 在哪裡：`output/<meeting>/會議記錄_<meeting>.md`，有出 .docx 的話再加 `output/<meeting>/會議記錄_<meeting>.docx`；有逐字稿就列出每一份 `逐字稿_<meeting>_N.md`。`untranscribed` 不是空的，就說哪幾支錄音還沒轉好、所以少了哪幾號逐字稿。
 4. `unfilled` 逐項列出來，用使用者看得懂的說法（`meta.location` → 「地點」，`action_items[1].owner` → 「第 2 筆待辦的負責人」），並說明這些格子在 Deliverable 上顯示為「未提及」。**不要**建議由你把它們補滿。
 5. 檢查的三份清單。`missing_source` 與 `unmapped_variables` 是 `unfilled` 沒講到的兩件事，一定要講；`blank_fields` 與 `unfilled` 多半重疊，只補上 `unfilled` 沒有的那幾項就好，不要把同一個空格講兩遍。三份都空就講一句「檢查沒有發現」。
 
@@ -157,7 +161,7 @@ docker compose run --rm mm check <meeting> --schema <schema> --markdown-template
 
 - 內容要改（錯字、補負責人）→ 直接編 `records/<meeting>.yaml`，再重跑 `mm-minutes`。它只會重新 Render，不會重抽。
 - 素材有新增或更正 → 補進 `rawdata/<meeting>/`，然後明確要求重抽（`--reextract`）。**只補素材重跑是不會納入新素材的**，因為預設不重抽。
-- 要換一份樣板 → 重跑 `mm-minutes` 換選一份 Docx Template 即可。不重抽、不重讀素材。
+- 要換一份樣板 → 重跑 `mm-minutes` 並指名要用哪一份 Docx Template 即可。不重抽、不重讀素材。
 
 ## 邊界
 
@@ -166,5 +170,5 @@ docker compose run --rm mm check <meeting> --schema <schema> --markdown-template
 - 不要寫入 `rawdata/`，也不要改 `notes/` 裡的 Note。要修內容就改 Minutes Record。
 - 不要改 `templates/` 底下的東西。Schema 要調整轉給 `mm-schema`。
 - 不要自己用別的工具硬轉錄音——錄音走 Transcribe（`docs/adr/0006-transcribe-recordings-via-asr-service.md`）。也不要自己讀圖補內容，理由見 `docs/adr/0005-no-image-ingest.md`。
-- .docx 只由 `--docx-template` 產出。使用者選了「不使用」就是不產，不要用別的工具硬轉，也不要「順便」補一份。
+- .docx 只由 `--docx-template` 產出。使用者明講不要就是不產，不要用別的工具硬轉，也不要「順便」補一份。
 - 要把客戶給的 .docx 變成可渲染的 Docx Template（打洞）不是這個 skill 的事，轉給 `mm-template`。
